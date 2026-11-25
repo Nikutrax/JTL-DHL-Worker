@@ -26,4 +26,10 @@ Keine echten Zugangsdaten oder Kundendaten einchecken. SQL-Direktzugriffe vor pr
 
 ## Status
 
-Importbasis, noch nicht als vollständiges Release getestet. Keine Lizenz festgelegt; zunächst privates Repository empfohlen.
+Importbasis, noch nicht als vollständiges Release getestet. Die Beta ist nicht für unkontrollierten Produktivbetrieb freigegeben.
+
+## Lizenz und Mitarbeit
+
+Der Projektcode steht unter [GNU GPL v3.0 (GPL-3.0-only)](LICENSE). Die Rechte an externen Produkten und Marken bleiben unberührt.
+
+Beiträge sind willkommen: [Anleitung zur Mitarbeit](CONTRIBUTING.md), [Issues](../../issues) und Pull Requests gegen `develop`.
