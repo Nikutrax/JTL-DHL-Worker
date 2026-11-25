@@ -1,0 +1,10 @@
+{
+  "LabelPath": "C:\\JTL-DHL\\Labels",
+  "ArchivePath": "C:\\JTL-DHL\\Labels\\Gedruckt",
+  "ErrorPath": "C:\\JTL-DHL\\Labels\\Druckfehler",
+  "PrinterName": "DHL Label",
+  "Pdf24DocTool": "C:\\Program Files\\PDF24\\pdf24-DocTool.exe",
+  "PollSeconds": 3,
+  "FileReadySeconds": 2,
+  "ExcludeNameContains": ["retoure", "return", "ruecksendung"]
+}
