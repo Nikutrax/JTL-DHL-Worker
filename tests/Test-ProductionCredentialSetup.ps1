@@ -9,8 +9,8 @@ New-Item -ItemType Directory -Path $root | Out-Null
 # Simulated input and clipboard; real Windows DPAPI.
 function Read-Host {
     param([string]$Prompt, [switch]$AsSecureString)
-    if ($script:inputs.Count -eq 0) { throw 'Unexpected input prompt' }
-    $next = [string]$script:inputs.Dequeue()
+    if ($global:JtlCredentialTestInputs.Count -eq 0) { throw "Unexpected input prompt: $Prompt" }
+    $next = [string]$global:JtlCredentialTestInputs.Dequeue()
     if ($AsSecureString) {
         if ($next -eq '') { return (New-Object System.Security.SecureString) }
         return (ConvertTo-SecureString $next -AsPlainText -Force)
@@ -20,8 +20,8 @@ function Read-Host {
 function Get-Clipboard {
     [CmdletBinding()]
     param([switch]$Raw)
-    if ($script:clipboardReads.Count -eq 0) { throw 'Unexpected clipboard access' }
-    $next = [string]$script:clipboardReads.Dequeue()
+    if ($global:JtlCredentialTestClipboard.Count -eq 0) { throw 'Unexpected clipboard access' }
+    $next = [string]$global:JtlCredentialTestClipboard.Dequeue()
     if ($next -eq '__CLIPBOARD_ERROR__') { throw 'Simulated unavailable clipboard' }
     return $next
 }
@@ -29,15 +29,15 @@ function Set-Clipboard {
     [CmdletBinding()]
     param([AllowEmptyString()][string]$Value)
     if ($Value -ne '') { throw 'Unexpected clipboard write' }
-    $script:clearCount++
+    $global:JtlCredentialTestClears++
 }
 function Test-Setup {
     param([string]$Name,[string[]]$InputValues,[string[]]$ClipboardValues,[int]$ExpectedClears,[bool]$ExpectFailure = $false)
-    $script:inputs = New-Object 'System.Collections.Generic.Queue[string]'
-    foreach ($v in $InputValues) { $script:inputs.Enqueue($v) }
-    $script:clipboardReads = New-Object 'System.Collections.Generic.Queue[string]'
-    foreach ($v in $ClipboardValues) { $script:clipboardReads.Enqueue($v) }
-    $script:clearCount = 0
+    $global:JtlCredentialTestInputs = New-Object 'System.Collections.Generic.Queue[string]'
+    foreach ($v in $InputValues) { $global:JtlCredentialTestInputs.Enqueue($v) }
+    $global:JtlCredentialTestClipboard = New-Object 'System.Collections.Generic.Queue[string]'
+    foreach ($v in $ClipboardValues) { $global:JtlCredentialTestClipboard.Enqueue($v) }
+    $global:JtlCredentialTestClears = 0
     $path = Join-Path $root ($Name + '.json')
     $failure = $null
     try { & $target -OutputFile $path } catch { $failure = $_ }
@@ -59,8 +59,8 @@ function Test-Setup {
             } finally { $decoded.Dispose(); $actual = $null }
         }
     }
-    if ($script:inputs.Count -ne 0 -or $script:clipboardReads.Count -ne 0) { throw "$Name unused test inputs" }
-    if ($script:clearCount -ne $ExpectedClears) { throw "$Name clipboard clearing count mismatch" }
+    if ($global:JtlCredentialTestInputs.Count -ne 0 -or $global:JtlCredentialTestClipboard.Count -ne 0) { throw "$Name unused test inputs" }
+    if ($global:JtlCredentialTestClears -ne $ExpectedClears) { throw "$Name clipboard clearing count mismatch" }
     Write-Host "PASS: $Name"
 }
 try {
@@ -70,5 +70,6 @@ try {
     Test-Setup -Name 'invalid-user' -InputValues @('M','dummy-key','J','M','dummy-secret','J','','dummy-password') -ClipboardValues @() -ExpectedClears 0 -ExpectFailure $true
     Write-Host 'All Windows credential setup tests passed.'
 } finally {
+    Remove-Variable JtlCredentialTestInputs,JtlCredentialTestClipboard,JtlCredentialTestClears -Scope Global -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $root -Recurse -Force
 }
