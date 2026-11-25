@@ -1,0 +1,17 @@
+config.json
+print-config.json
+production-credentials.json
+.env
+.env.*
+*.log
+*.pdf
+*.csv
+!JTL-Export-Beispiel.csv
+Export/
+Import/
+Labels/
+Processed/
+Error/
+State/
+Logs/
+*.bak
