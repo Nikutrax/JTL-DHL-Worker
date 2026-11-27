@@ -25,13 +25,23 @@ Automatischen Abgleich aktivieren und mit einem getrennten internen Testliefersc
 
 ### Exportvorlage in JTL-Wawi anlegen
 
+![JTL-Wawi: Übersicht der Exportvorlagen](images/jtl-export-overview.png)
+
+*Beispiel: eigene Exportvorlage mit der Speicheroption Vorhandene Datei überschreiben.*
+
 Öffne **Vorlagen für Versanddatenexport anlegen und bearbeiten**. Über **Anlegen** eine eigene Vorlage erstellen oder eine vorhandene eigene Vorlage mit **Bearbeiten** öffnen. Im Beispiel heißt sie **NikuTRAX DHL Export**.
 
 In der getesteten Konfiguration ist bei **Aktion bei vorhandener Datei** die Option **Vorhandene Datei überschreiben** eingestellt. Diese Einstellung ersetzt nicht den Buchungsschutz des Workers. Dateinamen müssen eindeutig genug sein, damit offene Exportdateien nicht durch andere Pakete überschrieben werden. Mehrpaketsendungen sind nicht für die Automatik freigegeben.
 
 Öffne die Vorlage mit **Bearbeiten**. Unter **Ausgabe** den individuellen Dateipfad einstellen. 
 
+![JTL-Wawi: Exportvorlage bearbeiten](images/jtl-export-detail.png)
+
+*Beispielkonfiguration; Vorlagenname und Dateipfad sind frei wählbar.*
+
 #### Dateiname
+
+![JTL-Wawi: Dateiname aus Template erzeugen](images/jtl-export-filename-template.png)
 
 Im Feld **Dateiname** auf die Schaltfläche `...` klicken. Im Dialog **Dateiname festlegen** die Option **Dateiname aus Template erzeugen** auswählen und den folgenden DotLiquid-Ausdruck als einzelne Zeile einfügen:
 
@@ -64,6 +74,10 @@ Die Vorlage verwendet vorrangig das Paketgewicht, ersatzweise das Versandgewicht
 Über **Vorschau (Text)** kontrollieren, dass Kopfzeile und Datenzeile getrennt sind, jede Zeile 16 Felder enthält, die Paket-ID mit P beginnt und keine zusätzlichen Leerzeichen am Anfang der Paket-ID stehen. Freitextfelder mit Semikolon oder Zeilenumbrüchen können das CSV-Format stören; solche Exporte vor der Buchung prüfen. Anschließend **Speichern**.
 
 ### Importvorlage in JTL-Wawi anlegen
+
+![JTL-Wawi: Importvorlage und Zuordnung der Trackingfelder](images/jtl-import-field-mapping.png)
+
+*Beispiel: Index 1 ID-Nummer, Index 2 Tracking-Nr.*
 
 Öffne **Vorlagen für Versanddatenimport anlegen und bearbeiten**. Über **Anlegen** eine eigene Vorlage erstellen, beispielsweise **NikuTRAX DHL Tracking**.
 
