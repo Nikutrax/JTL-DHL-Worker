@@ -29,7 +29,29 @@ Automatischen Abgleich aktivieren und mit einem getrennten internen Testliefersc
 
 In der getesteten Konfiguration ist bei **Aktion bei vorhandener Datei** die Option **Vorhandene Datei überschreiben** eingestellt. Diese Einstellung ersetzt nicht den Buchungsschutz des Workers. Dateinamen müssen eindeutig genug sein, damit offene Exportdateien nicht durch andere Pakete überschrieben werden. Mehrpaketsendungen sind nicht für die Automatik freigegeben.
 
-Die eigentliche Feldzuordnung und der vollständige Dateinamenausdruck sind in der Übersichtsansicht nicht sichtbar. Die CSV-Spalten müssen der oben angegebenen Kopfzeile entsprechen.
+Öffne die Vorlage mit **Bearbeiten**. Unter **Ausgabe** den individuellen Dateipfad einstellen. Der Dateiname der Pilotinstallation verwendet die Lieferschein-Belegnummer und einen Zeitstempel (yyyyMMdd_HHmmss). Der vollständige Ausdruck ist im Screenshot rechts abgeschnitten; er wird daher hier nicht als exakte Kopiervorlage angegeben.
+
+#### Kopfzeile
+
+Im Reiter **Kopfzeile** exakt folgende Zeile einfügen und anschließend einmal Enter drücken, damit ein Zeilenumbruch nach der Kopfzeile vorhanden ist:
+
+```text
+PaketRef;Lieferschein;Versandart;Vorname;Nachname;Firma;Adresszusatz;Strasse;Hausnummer;PLZ;Ort;LandISO;Email;Telefon;Mobil;Gewicht
+```
+
+#### Hauptbereich
+
+Im Reiter **Hauptbereich** folgenden DotLiquid-Code einfügen (eine Datenzeile innerhalb der Schleife):
+
+```liquid
+{% for Paket in Vorgang.Pakete -%}
+P{{ Paket.InternePaketnummer }};{{ Lieferschein.Lieferscheinnummer }};{{ Lieferschein.Auftrag.Versandart.Name | Remove:'"' }};{{ Lieferschein.Auftrag.Lieferadresse.Vorname | Remove:'"' }};{{ Lieferschein.Auftrag.Lieferadresse.Name | Remove:'"' }};{{ Lieferschein.Auftrag.Lieferadresse.Firma | Remove:'"' }};{{ Lieferschein.Auftrag.Lieferadresse.AdressZusatz | Remove:'"' }};{{ Lieferschein.Auftrag.Lieferadresse.Straße | OhneHausnummer | Remove:'"' }};{{ Lieferschein.Auftrag.Lieferadresse.Straße | NurHausnummer | Remove:'"' }};{{ Lieferschein.Auftrag.Lieferadresse.PLZ }};{{ Lieferschein.Auftrag.Lieferadresse.Ort | Remove:'"' }};{{ Lieferschein.Auftrag.Lieferadresse.LandISO }};{{ Lieferschein.Auftrag.Lieferadresse.EMail }};{{ Lieferschein.Auftrag.Lieferadresse.Telefon }};{{ Lieferschein.Auftrag.Lieferadresse.Mobil }};{% if Paket.Gewicht > 0 %}{{ Paket.Gewicht }}{% elsif Lieferschein.Positionen.VersandGewichtGesamt > 0 %}{{ Lieferschein.Positionen.VersandGewichtGesamt | Plus:Lieferschein.Auftrag.Versandart.Zusatzgewicht }}{% else %}0.5{% endif %}
+{% endfor -%}
+```
+
+Die Vorlage verwendet vorrangig das Paketgewicht, ersatzweise das Versandgewicht der Lieferscheinpositionen einschließlich Zusatzgewicht der Versandart, andernfalls 0.5 kg. Tatsächliches Versandgewicht vor der Buchung prüfen. Die Schleife kann mehrere Paketzeilen erzeugen; die aktuelle Automatik ist jedoch ausschließlich für eine Paketzeile je Datei freigegeben.
+
+Über **Vorschau (Text)** kontrollieren, dass Kopfzeile und Datenzeile getrennt sind, jede Zeile 16 Felder enthält, die Paket-ID mit P beginnt und keine zusätzlichen Leerzeichen am Anfang der Paket-ID stehen. Freitextfelder mit Semikolon oder Zeilenumbrüchen können das CSV-Format stören; solche Exporte vor der Buchung prüfen. Anschließend **Speichern**.
 
 ### Importvorlage in JTL-Wawi anlegen
 
