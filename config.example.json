@@ -24,26 +24,17 @@
   "AutoPrintPdf": false,
   "TransmitRecipientEmail": false,
   "TransmitRecipientPhone": false,
-  "JtlSqlServer": "localhost\\JTLWAWI",
-  "JtlDatabase": "Mandant_1",
   "SandboxBilling": {
     "V01PAK": "HIER_SANDBOX_ABRECHNUNGSNUMMER_PAKET",
     "V62KP": "HIER_SANDBOX_ABRECHNUNGSNUMMER_KLEINPAKET",
-    "V53WPAK": "HIER_SANDBOX_ABRECHNUNGSNUMMER_INTERNATIONAL"
+    "V53WPAK": "HIER_SANDBOX_ABRECHNUNGSNUMMER_INTERNATIONAL",
+    "V66WPI": "HIER_SANDBOX_ABRECHNUNGSNUMMER_WARENPOST"
   },
   "ProductionBilling": {
     "V01PAK": "HIER_PRODUKTIONS_ABRECHNUNGSNUMMER_PAKET",
     "V62KP": "HIER_PRODUKTIONS_ABRECHNUNGSNUMMER_KLEINPAKET",
-    "V53WPAK": "HIER_PRODUKTIONS_ABRECHNUNGSNUMMER_INTERNATIONAL"
-  },
-  "OttoReturnBillingNumber": "HIER_DHL_RETOURE_ABRECHNUNGSNUMMER",
-  "OttoReturnAddress": {
-    "name1": "Musterfirma GmbH",
-    "addressStreet": "Musterstrasse",
-    "addressHouse": "1",
-    "postalCode": "12345",
-    "city": "Musterstadt",
-    "country": "DEU"
+    "V53WPAK": "HIER_PRODUKTIONS_ABRECHNUNGSNUMMER_INTERNATIONAL",
+    "V66WPI": "HIER_PRODUKTIONS_ABRECHNUNGSNUMMER_WARENPOST"
   },
   "SandboxShipper": {
     "name1": "DHL Sandbox Test",
@@ -53,6 +44,6 @@
     "city": "Bonn",
     "country": "DEU"
   },
-  "EnableExperimentalShippingStatusSql": false,
-  "AmazonPlatformId": 0
+  "CsvAutomationEnabled": false,
+  "CsvAutomationNotBefore": ""
 }
