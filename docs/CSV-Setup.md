@@ -29,7 +29,17 @@ Automatischen Abgleich aktivieren und mit einem getrennten internen Testliefersc
 
 In der getesteten Konfiguration ist bei **Aktion bei vorhandener Datei** die Option **Vorhandene Datei überschreiben** eingestellt. Diese Einstellung ersetzt nicht den Buchungsschutz des Workers. Dateinamen müssen eindeutig genug sein, damit offene Exportdateien nicht durch andere Pakete überschrieben werden. Mehrpaketsendungen sind nicht für die Automatik freigegeben.
 
-Öffne die Vorlage mit **Bearbeiten**. Unter **Ausgabe** den individuellen Dateipfad einstellen. Der Dateiname der Pilotinstallation verwendet die Lieferschein-Belegnummer und einen Zeitstempel (yyyyMMdd_HHmmss). Der vollständige Ausdruck ist im Screenshot rechts abgeschnitten; er wird daher hier nicht als exakte Kopiervorlage angegeben.
+Öffne die Vorlage mit **Bearbeiten**. Unter **Ausgabe** den individuellen Dateipfad einstellen. 
+
+#### Dateiname
+
+Im Feld **Dateiname** auf die Schaltfläche `...` klicken. Im Dialog **Dateiname festlegen** die Option **Dateiname aus Template erzeugen** auswählen und den folgenden DotLiquid-Ausdruck als einzelne Zeile einfügen:
+
+```liquid
+{{ Vorgang.Lieferschein.Belegnummer | AlsDateiname }}_{{ Datum.Gestartet | Datum: 'yyyyMMdd_HHmmss' | AlsDateiname }}.csv
+```
+
+Mit **OK** bestätigen. Der Dateiname besteht aus der Lieferschein-Belegnummer, einem Unterstrich, dem Zeitstempel und der Endung `.csv`, beispielsweise `5142-001_20261127_135225.csv` (fiktives Beispiel). `AlsDateiname` bereitet die jeweiligen Werte für die Verwendung im Dateinamen auf. Der Zeitstempel hat Sekundengenauigkeit; bei wiederholtem Export desselben Lieferscheins innerhalb einer Sekunde kann derselbe Name entstehen. Die PaketRef und der Buchungsstatus bleiben für den Duplikatschutz maßgeblich.
 
 #### Kopfzeile
 
