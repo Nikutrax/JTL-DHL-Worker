@@ -23,6 +23,38 @@ P1234;TEST123456789
 
 Automatischen Abgleich aktivieren und mit einem getrennten internen Testlieferschein prüfen (keine Kundenbenachrichtigung, kein echter Labelkauf). Vor dem Test alle Labelerzeuger stoppen. Test-Exportdatei anschließend aus dem Exportordner archivieren. In JTL sowohl Trackingnummer als auch Versanddatum kontrollieren. Bei ausbleibendem Import JTL-Konfiguration und gegebenenfalls Packtisch+/WMS prüfen.
 
+### Automatischen Versanddatenaustausch konfigurieren
+
+Öffne in JTL-Wawi den Dialog **Versanddatenaustausch konfigurieren**. Die folgenden Einstellungen entsprechen der getesteten Pilotinstallation mit JTL-Wawi 2.1.2. Die Namen und Pfade sind Beispiele und können individuell gewählt werden.
+
+| Einstellung | Export | Import |
+| --- | --- | --- |
+| Vorlagenname | NikuTRAX DHL Export | NikuTRAX DHL Tracking |
+| Vorlagenart | Export | Import |
+| Pfad (Beispiel) | `N:\DHL-Versand\Export` | `N:\DHL-Versand\Import` |
+| Automatischer Abgleich aktiv | Ja | Ja |
+| Worker-Konfiguration | ExportPath | ImportPath |
+
+**Export einrichten**
+
+1. Über **Anlegen** eine Export-Konfiguration erstellen bzw. die bestehende Exportvorlage auswählen.
+2. Die Exportfelder und das CSV-Format wie oben beschrieben einrichten.
+3. In der Liste die Exportvorlage auswählen und unter **Exportpfad** das vom Worker überwachte Verzeichnis angeben.
+4. **Automatischer Abgleich aktiv** anhaken und **Speichern** wählen.
+5. Die Zuordnung zur verwendeten Versandart und den tatsächlichen Export beim Ausliefern prüfen.
+
+**Import einrichten**
+
+1. Über **Anlegen** eine Import-Konfiguration erstellen bzw. die bestehende Importvorlage auswählen.
+2. CSV mit Semikolon und Kopfzeile konfigurieren: PaketRef als ID-Nummer, Tracking als Tracking-Nr.
+3. In der Liste die Importvorlage auswählen und unter **Importpfad** das Verzeichnis angeben, in das der Worker seine Tracking-CSV schreibt.
+4. **Automatischer Abgleich aktiv** anhaken und **Speichern** wählen.
+5. Mit einem internen Testlieferschein prüfen, ob JTL Trackingnummer und Versanddatum ohne manuellen CSV-Import übernimmt.
+
+Export- und Importverzeichnis müssen getrennt sein. Die Pfade in JTL und der Worker-Konfiguration müssen auf dieselben jeweiligen Verzeichnisse zeigen. Bei Netzlaufwerken muss auch das Konto der Aufgabenplanung Zugriff haben; für den Worker sind UNC-Pfade vorzuziehen.
+
+Der Worker benötigt keinen Aufruf der jtlcore.dll. Der Rückimport wird durch JTL selbst ausgeführt. Ob Packtisch+ oder WMS für den automatischen Abgleich erforderlich ist, ist noch nicht abschließend geklärt.
+
 ## 3. Konfiguration und Zugangsdaten
 
 `config.example.json` nach `config.json` kopieren. ExportPath, ImportPath, LabelPath, ProcessedPath, ErrorPath, StatePath und LogPath auf getrennte, für das Worker-Konto erreichbare Ordner setzen; bei Netzwerkpfaden UNC bevorzugen. Für Production die eigene Absenderreferenz und Abrechnungsnummer hinterlegen. `Production-Zugang-Einrichten.ps1` unter demselben Windows-Konto ausführen wie den Worker; standardmäßig wird `production-credentials.json` erzeugt (DPAPI). Keine Produktionszugangsdaten in die Beispieldatei schreiben.
