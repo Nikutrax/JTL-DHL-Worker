@@ -23,6 +23,28 @@ P1234;TEST123456789
 
 Automatischen Abgleich aktivieren und mit einem getrennten internen Testlieferschein prüfen (keine Kundenbenachrichtigung, kein echter Labelkauf). Vor dem Test alle Labelerzeuger stoppen. Test-Exportdatei anschließend aus dem Exportordner archivieren. In JTL sowohl Trackingnummer als auch Versanddatum kontrollieren. Bei ausbleibendem Import JTL-Konfiguration und gegebenenfalls Packtisch+/WMS prüfen.
 
+### Exportvorlage in JTL-Wawi anlegen
+
+Öffne **Vorlagen für Versanddatenexport anlegen und bearbeiten**. Über **Anlegen** eine eigene Vorlage erstellen oder eine vorhandene eigene Vorlage mit **Bearbeiten** öffnen. Im Beispiel heißt sie **NikuTRAX DHL Export**.
+
+In der getesteten Konfiguration ist bei **Aktion bei vorhandener Datei** die Option **Vorhandene Datei überschreiben** eingestellt. Diese Einstellung ersetzt nicht den Buchungsschutz des Workers. Dateinamen müssen eindeutig genug sein, damit offene Exportdateien nicht durch andere Pakete überschrieben werden. Mehrpaketsendungen sind nicht für die Automatik freigegeben.
+
+Die eigentliche Feldzuordnung und der vollständige Dateinamenausdruck sind in der Übersichtsansicht nicht sichtbar. Die CSV-Spalten müssen der oben angegebenen Kopfzeile entsprechen.
+
+### Importvorlage in JTL-Wawi anlegen
+
+Öffne **Vorlagen für Versanddatenimport anlegen und bearbeiten**. Über **Anlegen** eine eigene Vorlage erstellen, beispielsweise **NikuTRAX DHL Tracking**.
+
+| Einstellung | Wert |
+| --- | --- |
+| Trennzeichen | Semikolon |
+| Anzahl Kopfzeilen | 1 |
+| Index 1 | ID-Nummer |
+| Index 2 | Tracking-Nr |
+| Weitere Spalten | Keine Zuordnung |
+
+Die erste CSV-Spalte enthält die PaketRef, die zweite die Trackingnummer. Über **Speichern** die Vorlage sichern. Anschließend den automatischen Versanddatenaustausch wie unten beschrieben konfigurieren.
+
 ### Automatischen Versanddatenaustausch konfigurieren
 
 Öffne in JTL-Wawi den Dialog **Versanddatenaustausch konfigurieren**. Die folgenden Einstellungen entsprechen der getesteten Pilotinstallation mit JTL-Wawi 2.1.2. Die Namen und Pfade sind Beispiele und können individuell gewählt werden.
