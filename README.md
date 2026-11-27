@@ -1,35 +1,43 @@
 # JTL DHL Worker – Community
 
-Importstand: v1.14 (PowerShell 5.1), ergänzt um die Server- und Print-Agent-Dateien aus v1.13. Kein offizielles Produkt von JTL oder DHL.
+**Entwicklungsstand: v1.15-beta.1 (CSV-Architektur, noch nicht veröffentlicht)**
 
-## Funktionen
+Kostenlose Open-Source-Versandanbindung zwischen JTL-Wawi und DHL Paket API Shipping V2 (Windows PowerShell 5.1). Kein offizielles Produkt von JTL oder DHL.
 
-- CSV-Übergabe aus JTL-Wawi an DHL Paket API Shipping V2
-- Labelerstellung und optionaler separater PDF24-Print-Agent
-- Direktes SQL-Update von Tracking und Versanddatum; kein paralleler JTL-Versanddatenimport
-- Sandbox- und Production-Modus mit expliziten Freigaben
-- Experimentelle SQL-Versandstatusintegration (standardmäßig deaktiviert)
+## Was ist neu?
 
-## Einrichtung
+JTL-Wawi exportiert ein Paket als CSV. Der Worker validiert die Sendung, bucht einmalig das DHL-Label und speichert das PDF sowie den Buchungsstatus. Er stellt anschließend eine Tracking-CSV bereit. JTL importiert die Trackingnummer über seine eigene Versanddatenschnittstelle und setzt das Versanddatum. **Kein direkter SQL-Zugriff durch den neuen Versandworker.**
 
-1. `config.example.json` nach `config.json` kopieren und lokal konfigurieren.
-2. CSV-Export entsprechend `JTL-Export-Kopfzeile.txt` einrichten.
-3. Zuerst Sandbox-Validierung ausführen.
-4. Für Production den Zugang unter dem Windows-Konto des Workers einrichten; zunächst nur validieren.
-5. Echtversand erst nach erfolgreichen Tests und Datenbank-Backup freigeben.
+Die private Pilotversion v1.12e wurde am 27.11.2026 mit JTL-Wawi 2.1.2 im DHL-Inlandsversand erfolgreich im Automatikbetrieb getestet. Der öffentliche Entwicklungsstand wurde davon abgeleitet; installationsbezogene Abrechnungs- und Absenderdaten wurden entfernt. Die öffentliche Variante benötigt eigene erneute Tests.
 
-Die ergänzenden Startskripte und Print-Agent-Dateien stammen unverändert aus v1.13. Sie wurden nicht mit v1.14 ausgeführt oder auf Kompatibilität getestet. Historische Anleitung: [v1.13](docs/legacy/README-v1.13.txt).
+## Einstieg
+
+1. [CSV-Installations- und Migrationsanleitung](docs/CSV-Setup.md) lesen.
+2. `config.example.json` nach `config.json` kopieren und lokal konfigurieren.
+3. JTL-Export und JTL-Import einrichten und den Import mit einem internen Testauftrag prüfen.
+4. In der Sandbox oder Production zunächst ausschließlich eine Einzeldatei validieren. Keine echten Sendungen buchen.
+5. Erst nach erfolgreicher Prüfung einer tatsächlich zu versendenden Inlandssendung und Kontrolle in JTL die Automatik ausdrücklich freigeben.
+
+Die Beispielkonfiguration erlaubt keine Production-Buchungen und keine Automatik. Nicht mit dem SQL-Legacy-Worker oder einem anderen Labelerzeuger parallel betreiben.
+
+## Aktuell unterstützter Pilotumfang
+
+- Automatik: genau ein Paket je Exportdatei, Versandart `Versicherter Versand DHL`, Deutschland (V01PAK).
+- Andere Versandarten, internationale Sendungen, Kleinpaket, Premium und Mehrpaketverarbeitung sind nicht für den unbeaufsichtigten Betrieb freigegeben.
+- Die kombinierte OTTO-Retourenbuchung ist gesperrt. Marktplatzstatus und Retourenrückmeldung sind nicht abschließend geprüft.
+- Das vorhandene PrintAgent-Zubehör bleibt erhalten; dessen Integration mit der neuen Version ist separat zu testen.
+- Der Worker hat keine technische Importquittung von JTL. Das Verschwinden einer CSV allein ist kein Erfolgsnachweis; Trackingnummer, Versanddatum und gegebenenfalls Marktplatzstatus kontrollieren.
+
+## Bisherige SQL-Version
+
+Die öffentliche v1.14-beta.2 bleibt im [Legacy-Branch](../../tree/legacy/sql-v1.14-beta.2) einschließlich ihrer Konfiguration und Startskripte erhalten. Sie ist eine getrennte Rückfalloption, keine parallel auszuführende Komponente. Bestehende Buchungsstatusdateien dürfen bei einem Wechsel nicht gelöscht werden.
 
 ## Sicherheit
 
-Keine echten Zugangsdaten oder Kundendaten einchecken. SQL-Direktzugriffe vor produktivem Einsatz auf einem Testmandanten prüfen. `EnableExperimentalShippingStatusSql` bleibt `false`; `AmazonPlatformId` bleibt `0`, bis die installationsabhängige Zuordnung geprüft wurde.
-
-## Status
-
-Importbasis, noch nicht als vollständiges Release getestet. Die Beta ist nicht für unkontrollierten Produktivbetrieb freigegeben.
+Keine Zugangsdaten, echte Abrechnungsnummern, privaten Konfigurationen, Kunden-CSV, PDF-Labels oder Versandlogs veröffentlichen. Unklare Buchungen niemals einfach wiederholen. Die dateibasierte Sperre erkennt keine Buchungen, die außerhalb des Workers ohne lokale Nachweise vorgenommen wurden. Details und Wiederherstellung siehe [CSV-Setup](docs/CSV-Setup.md).
 
 ## Lizenz und Mitarbeit
 
-Der Projektcode steht unter [GNU GPL v3.0 (GPL-3.0-only)](LICENSE). Die Rechte an externen Produkten und Marken bleiben unberührt.
+[GNU GPL v3.0 (GPL-3.0-only)](LICENSE). Rechte an externen Produkten und Marken bleiben unberührt.
 
 Beiträge sind willkommen: [Anleitung zur Mitarbeit](CONTRIBUTING.md), [Issues](../../issues) und Pull Requests gegen `develop`.
