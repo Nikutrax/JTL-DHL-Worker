@@ -7,7 +7,8 @@
 - Automatik zunächst nur für reguläres DHL Paket Deutschland, ein Paket je CSV.
 - Importüberwachung warnt bei ausstehenden Dateien; keine technische JTL-Importbestätigung.
 - SQL-Legacy-Stand separat gesichert. Keine parallele Ausführung.
-- Öffentliche Variante erneut testen; Retouren, weitere Versandarten, Mehrpaket- und Marktplatzabläufe nicht freigegeben.
+- Amazon-Praxistest am 27.11.2026: erfolgreiche Versandbestätigung bei Amazon vom Betreiber für die private SQL-freie v1.12e mit JTL-Wawi 2.1.2 gemeldet. Die Marktplatzmeldung liegt bei JTL.
+- Öffentliche Variante erneut testen; Retouren, weitere Versandarten, Mehrpaket- und ungeprüfte Marktplatzabläufe nicht freigegeben. Der Amazon-Pilotbefund ist keine Freigabe der öffentlichen Beta.
 
 ## v1.14-beta.2
 - Vereinfachte Einrichtung der Production-Zugangsdaten via Zwischenablage oder verdeckte Eingabe (PR #11, #12).
