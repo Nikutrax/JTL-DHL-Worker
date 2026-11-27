@@ -64,3 +64,13 @@ Bei Migration und Rückfall immer zuerst beide Worker stoppen. Die bisherige Ver
 ## 7. Testumfang
 
 Die private v1.12e wurde am 27.11.2026 mit echtem DHL-Inlandsversand, NAS-Statusspeicherung und automatischem JTL-Import erfolgreich getestet. Die öffentliche Ableitung enthält bereinigte Vorgaben und strengere Sandbox-Sperren. Sie muss erneut getestet werden. Keine Freigabe für andere Versandarten, Retouren oder ungeprüfte Marktplatzprozesse.
+
+### Amazon-Praxistest (27.11.2026)
+
+- Teststand: private SQL-freie Pilotversion v1.12e, JTL-Wawi 2.1.2, DHL-Inlandsversand.
+- Ablauf: CSV-Export, DHL-Labelbuchung, Tracking-CSV, JTL-Import und Versanddatum; Marktplatzmeldung über JTL.
+- Ergebnis: Der Betreiber meldete eine erfolgreiche Versandbestätigung bei Amazon.
+- Bei Wiederholung den regulären JTL-Marktplatzabgleich nutzen, keine manuelle Versandbestätigung in Amazon auslösen und Versandstatus sowie Trackingnummer in Seller Central abgleichen.
+- Der Befund gilt für die private Pilotinstallation. Die öffentliche v1.15-beta.1 und weitere Marktplätze sind separat zu testen.
+
+
