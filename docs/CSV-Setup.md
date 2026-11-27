@@ -37,6 +37,10 @@ Automatischen Abgleich aktivieren und mit einem getrennten internen Testliefersc
 
 **Export einrichten**
 
+![JTL-Wawi: Exportpfad und automatischer Abgleich](images/jtl-csv-export.png)
+
+*Beispiel aus der Pilotinstallation. Vorlagenname und Pfad sind frei wählbar.*
+
 1. Über **Anlegen** eine Export-Konfiguration erstellen bzw. die bestehende Exportvorlage auswählen.
 2. Die Exportfelder und das CSV-Format wie oben beschrieben einrichten.
 3. In der Liste die Exportvorlage auswählen und unter **Exportpfad** das vom Worker überwachte Verzeichnis angeben.
@@ -44,6 +48,10 @@ Automatischen Abgleich aktivieren und mit einem getrennten internen Testliefersc
 5. Die Zuordnung zur verwendeten Versandart und den tatsächlichen Export beim Ausliefern prüfen.
 
 **Import einrichten**
+
+![JTL-Wawi: Importpfad und automatischer Abgleich](images/jtl-csv-import.png)
+
+*Beispiel aus der Pilotinstallation. Vorlagenname und Pfad sind frei wählbar.*
 
 1. Über **Anlegen** eine Import-Konfiguration erstellen bzw. die bestehende Importvorlage auswählen.
 2. CSV mit Semikolon und Kopfzeile konfigurieren: PaketRef als ID-Nummer, Tracking als Tracking-Nr.
