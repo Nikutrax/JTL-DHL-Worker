@@ -6,6 +6,8 @@ Windows PowerShell 5.1, DHL-API-Zugang, JTL-Wawi mit Versanddatenexport/-import.
 
 Alten SQL-Worker und alle anderen Labelerzeuger stoppen (auch Aufgabenplanung). Konfiguration, Skripte, Export-/Importordner, Statusdateien, Labels und Sicherungen sichern. Keine echten Zugangsdaten, Kundenadressen oder Versanddateien in GitHub ablegen. Bereits gebuchte oder ungeklärte Pakete im DHL-Portal und JTL abgleichen; alte Exportdateien außerhalb des überwachten Ordners sichern. Statusordner nicht leeren, dieselben Paket-IDs dürfen nicht erneut gebucht werden. Bei mehreren JTL-Mandanten separate Verzeichnisse und Statusordner benutzen.
 
+**Versionshinweis (27.11.2026):** In der privaten Pilotinstallation v1.12e mit JTL-Wawi 2.1.2 funktionierten der automatische Versanddatenimport und die Amazon-Versandbestätigung. Bei der anschließenden Prozessprüfung auf Server und Arbeitsplatz waren JTL-Worker bzw. JTL-SharpWawi aktiv, jedoch keine eigenständigen Packtisch+- oder WMS-Prozesse erkennbar. Ein Anwender berichtet für Wawi 1.11 mit seiner eigenen Versandlösung, dass Packtisch+ oder WMS dauerhaft laufen muss. Eine generelle Änderung in Wawi 2.x ist damit nicht nachgewiesen. Welche Komponente den Import ausführt und ob die Wawi geöffnet bleiben muss, ist noch zu testen. Für jede Installation den automatischen Rückimport vor Produktivfreigabe prüfen; gegebenenfalls Packtisch+ oder WMS mit eingerichtetem Versanddatenaustausch betreiben.
+
 ## 2. JTL-Vorlagen
 
 Versanddatenexport: Semikolon, eine Kopfzeile, genau ein Paket je CSV. PaketRef ist die interne Paketnummer mit Präfix P, z. B. `P{{Paket.InternePaketnummer}}`. Spalten gemäß `JTL-Export-Kopfzeile.txt`:
