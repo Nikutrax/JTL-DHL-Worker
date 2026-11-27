@@ -15,3 +15,16 @@ Error/
 State/
 Logs/
 *.bak
+
+# Local production config, credentials, backups and recovery evidence
+config.*.json
+!config.example.json
+config.json.*
+config.*.json.*
+production-credentials.json*
+production.credentials.json*
+*.error.txt
+*.tmp
+Verarbeitet/
+Fehler/
+Status/

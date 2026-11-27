@@ -4,19 +4,13 @@
     [switch]$ValidateOnly,
     [switch]$ApproveProductionShipment,
     [switch]$AutoProduction,
-    [string]$SpecificFile = ''
+    [string]$SpecificFile = '',
+    [switch]$CheckDuplicateOnly
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-# v1.14 Community-Ausgabe: optionale SQL-Versandstatus-Integration ist standardmaessig AUS.
-# Nur nach Pruefung der JTL-Datenbankstruktur und mit Datenbank-Backup einschalten.
-function Test-ConfigEnabled {
-    param([string]$Name)
-    return (($script:Config.PSObject.Properties.Name -contains $Name) -and ([bool]$script:Config.$Name))
-}
 
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
@@ -48,6 +42,8 @@ function Ensure-Directories {
 
 function Assert-Config {
     if ($script:Config.Environment -notin @('Sandbox','Production')) { throw "Environment muss Sandbox oder Production sein." }
+
+    if ($script:Config.Environment -eq 'Sandbox' -and -not $ValidateOnly) { throw 'Sandbox nur im Validierungsmodus; kein Import und keine Buchung.' }
 
     if ($script:Config.Environment -eq 'Production') {
         if ($ValidateOnly) {
@@ -410,634 +406,6 @@ function Get-BillingNumber {
 }
 
 
-function Get-OttoReturnBillingNumber {
-    if ($script:Config.PSObject.Properties['OttoReturnBillingNumber']) {
-        $v = [string]$script:Config.OttoReturnBillingNumber
-        if (-not [string]::IsNullOrWhiteSpace($v)) { return $v }
-    }
-    throw 'OttoReturnBillingNumber fehlt in config.json. Keine feste Abrechnungsnummer hinterlegt.'
-}
-
-function Get-OttoReturnAddress {
-    if ($script:Config.PSObject.Properties['OttoReturnAddress'] -and $script:Config.OttoReturnAddress) {
-        $a = $script:Config.OttoReturnAddress
-        return [ordered]@{
-            name1         = [string]$a.name1
-            addressStreet = [string]$a.addressStreet
-            addressHouse  = [string]$a.addressHouse
-            postalCode    = [string]$a.postalCode
-            city          = [string]$a.city
-            country       = [string]$a.country
-        }
-    }
-    throw 'OttoReturnAddress fehlt in config.json. Keine feste Retourenadresse hinterlegt.'
-}
-
-function Get-JtlSqlServer {
-    if ($script:Config.PSObject.Properties['JtlSqlServer']) {
-        $v = [string]$script:Config.JtlSqlServer
-        if (-not [string]::IsNullOrWhiteSpace($v)) { return $v }
-    }
-    return 'localhost\JTLWAWI'
-}
-
-function Get-JtlDatabase {
-    if ($script:Config.PSObject.Properties['JtlDatabase']) {
-        $v = [string]$script:Config.JtlDatabase
-        if (-not [string]::IsNullOrWhiteSpace($v)) { return $v }
-    }
-    return 'Mandant_1'
-}
-
-function Get-PaketIdFromRef {
-    param([string]$PaketRef)
-    if ([string]::IsNullOrWhiteSpace($PaketRef)) { throw 'PaketRef fehlt.' }
-    $m = [regex]::Match($PaketRef.Trim(), '^P?(\d+)$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if (-not $m.Success) { throw "PaketRef '$PaketRef' hat kein erwartetes Format P1234." }
-    return [int]$m.Groups[1].Value
-}
-
-function Open-JtlSqlConnection {
-    Add-Type -AssemblyName System.Data
-    $server = Get-JtlSqlServer
-    $db = Get-JtlDatabase
-    $cs = "Server=$server;Database=$db;Integrated Security=True;TrustServerCertificate=True;Application Name=JTL DHL Community Worker;"
-    $cn = New-Object System.Data.SqlClient.SqlConnection $cs
-    $cn.Open()
-    return $cn
-}
-
-function Assert-JtlTrackingTarget {
-    param(
-        [string]$PaketRef,
-        [string]$Lieferschein,
-        [string]$ExpectedVersandart,
-        [bool]$NeedsReturnTracking
-    )
-
-    $kVersand = Get-PaketIdFromRef $PaketRef
-    $cn = Open-JtlSqlConnection
-    try {
-        $cmd = $cn.CreateCommand()
-        $cmd.CommandText = @"
-SELECT
-    v.kVersand,
-    l.cLieferscheinNr,
-    va.cName AS Versandart,
-    v.cIdentCode,
-    v.cEnclosedReturnIdentCode
-FROM dbo.tVersand v
-JOIN dbo.tLieferschein l ON l.kLieferschein = v.kLieferschein
-LEFT JOIN dbo.tVersandArt va ON va.kVersandArt = v.kVersandArt
-WHERE v.kVersand = @kVersand;
-"@
-        [void]$cmd.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-        $cmd.Parameters["@kVersand"].Value = $kVersand
-
-        $da = New-Object System.Data.SqlClient.SqlDataAdapter $cmd
-        $dt = New-Object System.Data.DataTable
-        [void]$da.Fill($dt)
-
-        if ($dt.Rows.Count -ne 1) {
-            throw "JTL-Sicherheitsabbruch: PaketRef $PaketRef entspricht nicht exakt einem tVersand-Datensatz."
-        }
-
-        $r = $dt.Rows[0]
-        if ([string]$r.cLieferscheinNr -ne $Lieferschein) {
-            throw "JTL-Sicherheitsabbruch: PaketRef $PaketRef gehört in JTL zu Lieferschein '$($r.cLieferscheinNr)', CSV meldet '$Lieferschein'."
-        }
-        if ([string]$r.Versandart -ne $ExpectedVersandart) {
-            throw "JTL-Sicherheitsabbruch: JTL-Versandart ist '$($r.Versandart)' statt '$ExpectedVersandart'."
-        }
-
-        $outNo = if ($r.cIdentCode -eq [DBNull]::Value) { '' } else { [string]$r.cIdentCode }
-        if (-not [string]::IsNullOrWhiteSpace($outNo)) {
-            throw "JTL-Sicherheitsabbruch: JTL enthält für $PaketRef bereits Hinweg-Tracking '$outNo'. Keine neue DHL-Buchung."
-        }
-
-        if ($NeedsReturnTracking) {
-            $retNo = if ($r.cEnclosedReturnIdentCode -eq [DBNull]::Value) { '' } else { [string]$r.cEnclosedReturnIdentCode }
-            if (-not [string]::IsNullOrWhiteSpace($retNo)) {
-                throw "JTL-Sicherheitsabbruch: JTL enthält für $PaketRef bereits Retouren-Tracking '$retNo'. Keine neue DHL-Buchung."
-            }
-        }
-
-        return $kVersand
-    }
-    finally {
-        $cn.Close()
-    }
-}
-
-function Write-JtlTracking {
-    param(
-        [string]$PaketRef,
-        [string]$Lieferschein,
-        [string]$ExpectedVersandart,
-        [string]$Tracking,
-        [string]$ReturnTracking = ''
-    )
-
-    $kVersand = Get-PaketIdFromRef $PaketRef
-    $hasReturn = -not [string]::IsNullOrWhiteSpace($ReturnTracking)
-
-    $cn = Open-JtlSqlConnection
-    $tx = $cn.BeginTransaction()
-    try {
-        $cmd = $cn.CreateCommand()
-        $cmd.Transaction = $tx
-
-        if ($hasReturn) {
-            $cmd.CommandText = @"
-UPDATE v
-SET
-    v.cIdentCode = @Tracking,
-    v.cEnclosedReturnIdentCode = @ReturnTracking
-FROM dbo.tVersand v
-JOIN dbo.tLieferschein l ON l.kLieferschein = v.kLieferschein
-LEFT JOIN dbo.tVersandArt va ON va.kVersandArt = v.kVersandArt
-WHERE v.kVersand = @kVersand
-  AND l.cLieferscheinNr = @Lieferschein
-  AND va.cName = @Versandart
-  AND (v.cIdentCode IS NULL OR LTRIM(RTRIM(v.cIdentCode)) = '')
-  AND (v.cEnclosedReturnIdentCode IS NULL OR LTRIM(RTRIM(v.cEnclosedReturnIdentCode)) = '');
-"@
-        } else {
-            $cmd.CommandText = @"
-UPDATE v
-SET
-    v.cIdentCode = @Tracking
-FROM dbo.tVersand v
-JOIN dbo.tLieferschein l ON l.kLieferschein = v.kLieferschein
-LEFT JOIN dbo.tVersandArt va ON va.kVersandArt = v.kVersandArt
-WHERE v.kVersand = @kVersand
-  AND l.cLieferscheinNr = @Lieferschein
-  AND va.cName = @Versandart
-  AND (v.cIdentCode IS NULL OR LTRIM(RTRIM(v.cIdentCode)) = '');
-"@
-        }
-
-        [void]$cmd.Parameters.Add("@Tracking",[Data.SqlDbType]::NVarChar,255)
-        [void]$cmd.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-        [void]$cmd.Parameters.Add("@Lieferschein",[Data.SqlDbType]::NVarChar,255)
-        [void]$cmd.Parameters.Add("@Versandart",[Data.SqlDbType]::NVarChar,255)
-
-        $cmd.Parameters["@Tracking"].Value = $Tracking
-        $cmd.Parameters["@kVersand"].Value = $kVersand
-        $cmd.Parameters["@Lieferschein"].Value = $Lieferschein
-        $cmd.Parameters["@Versandart"].Value = $ExpectedVersandart
-
-        if ($hasReturn) {
-            [void]$cmd.Parameters.Add("@ReturnTracking",[Data.SqlDbType]::NVarChar,255)
-            $cmd.Parameters["@ReturnTracking"].Value = $ReturnTracking
-        }
-
-        $affected = $cmd.ExecuteNonQuery()
-        if ($affected -ne 1) {
-            throw "JTL-Tracking-Update hat $affected Zeilen getroffen; erwartet 1."
-        }
-
-        $check = $cn.CreateCommand()
-        $check.Transaction = $tx
-        $check.CommandText = @"
-SELECT cIdentCode,cEnclosedReturnIdentCode
-FROM dbo.tVersand
-WHERE kVersand=@kVersand;
-"@
-        [void]$check.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-        $check.Parameters["@kVersand"].Value = $kVersand
-
-        $reader = $check.ExecuteReader()
-        if (-not $reader.Read()) { throw 'JTL-Kontrolle: Datensatz nicht mehr vorhanden.' }
-
-        $dbTracking = if ($reader["cIdentCode"] -eq [DBNull]::Value) { '' } else { [string]$reader["cIdentCode"] }
-        $dbReturn = if ($reader["cEnclosedReturnIdentCode"] -eq [DBNull]::Value) { '' } else { [string]$reader["cEnclosedReturnIdentCode"] }
-        $reader.Close()
-
-        if ($dbTracking -ne $Tracking) {
-            throw 'JTL-Kontrolle: Hinweg-Tracking stimmt nach UPDATE nicht.'
-        }
-        if ($hasReturn -and $dbReturn -ne $ReturnTracking) {
-            throw 'JTL-Kontrolle: Retouren-Tracking stimmt nach UPDATE nicht.'
-        }
-
-        # Versandzeitpunkt sicherstellen und anschließend identisch in die Bestellung übernehmen.
-        # Falls tVersand.dVersendet bereits gesetzt ist, bleibt der vorhandene JTL-Zeitpunkt erhalten.
-        # Falls es noch NULL ist, setzt der Worker jetzt den aktuellen SQL-Server-Zeitpunkt.
-        $shipDateUpdate = $cn.CreateCommand()
-        $shipDateUpdate.Transaction = $tx
-        $shipDateUpdate.CommandText = @"
-UPDATE dbo.tVersand
-SET dVersendet = GETDATE()
-WHERE kVersand = @kVersand
-  AND dVersendet IS NULL;
-"@
-        [void]$shipDateUpdate.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-        $shipDateUpdate.Parameters["@kVersand"].Value = $kVersand
-        $shipDateAffected = $shipDateUpdate.ExecuteNonQuery()
-        if ($shipDateAffected -gt 1) {
-            throw "JTL-dVersendet-Update hat $shipDateAffected Versanddatensätze getroffen; erwartet maximal 1."
-        }
-
-        $dateUpdate = $cn.CreateCommand()
-        $dateUpdate.Transaction = $tx
-        $dateUpdate.CommandText = @"
-UPDATE b
-SET b.dVersandt = v.dVersendet
-FROM dbo.tBestellung b
-JOIN dbo.tLieferschein l ON l.kBestellung = b.kBestellung
-JOIN dbo.tVersand v ON v.kLieferschein = l.kLieferschein
-WHERE v.kVersand = @kVersand
-  AND v.dVersendet IS NOT NULL
-  AND b.dVersandt IS NULL;
-"@
-        [void]$dateUpdate.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-        $dateUpdate.Parameters["@kVersand"].Value = $kVersand
-        $dateAffected = $dateUpdate.ExecuteNonQuery()
-        if ($dateAffected -gt 1) {
-            throw "JTL-Versanddatum-Update hat $dateAffected Bestellungen getroffen; erwartet maximal 1."
-        }
-
-        $dateCheck = $cn.CreateCommand()
-        $dateCheck.Transaction = $tx
-        $dateCheck.CommandText = @"
-SELECT TOP 1
-    v.dVersendet,
-    b.dVersandt
-FROM dbo.tVersand v
-JOIN dbo.tLieferschein l ON l.kLieferschein = v.kLieferschein
-JOIN dbo.tBestellung b ON b.kBestellung = l.kBestellung
-WHERE v.kVersand = @kVersand;
-"@
-        [void]$dateCheck.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-        $dateCheck.Parameters["@kVersand"].Value = $kVersand
-
-        $dateReader = $dateCheck.ExecuteReader()
-        if (-not $dateReader.Read()) {
-            $dateReader.Close()
-            throw 'JTL-Kontrolle Versanddatum: Bestellung/Lieferschein nicht gefunden.'
-        }
-
-        $dbVersendet = if ($dateReader["dVersendet"] -eq [DBNull]::Value) { $null } else { [datetime]$dateReader["dVersendet"] }
-        $dbVersandt = if ($dateReader["dVersandt"] -eq [DBNull]::Value) { $null } else { [datetime]$dateReader["dVersandt"] }
-        $dateReader.Close()
-
-        if ($null -eq $dbVersendet) {
-            throw 'JTL-Kontrolle Versanddatum: tVersand.dVersendet ist nach dem Update unerwartet leer.'
-        }
-        if ($null -eq $dbVersandt -or $dbVersandt -ne $dbVersendet) {
-            throw 'JTL-Kontrolle Versanddatum: tBestellung.dVersandt wurde nicht korrekt aus tVersand.dVersendet übernommen.'
-        }
-
-        if (Test-ConfigEnabled 'EnableExperimentalShippingStatusSql') {
-        # Versandstatus fuer Shop/eBay/Amazon/weitere Verkaufskanaele zur Uebertragung vormerken.
-        # Referenz: SQL-Profiler-Mitschnitt vom 05.10.2026 beim manuellen JTL-Befehl
-        # "Versandstatus an Onlineshop/eBay/Amazon senden".
-        # WICHTIG: kPlattform wird aus Verkauf.tAuftrag uebernommen.
-        # Plattform-IDs sind installationsabhaengig. Amazon-ID wird nur aus der Konfiguration gelesen.
-        # kShop darf bei Plattformen wie Amazon/eBay NULL sein.
-
-        # Auftrag/Plattform/Lieferschein fuer Queue und Log eindeutig ermitteln.
-        $statusInfoCmd = $cn.CreateCommand()
-        $statusInfoCmd.Transaction = $tx
-        $statusInfoCmd.CommandText = @"
-SELECT TOP 1
-    a.cAuftragsNr,
-    a.kShop,
-    ISNULL(a.kPlattform, 0) AS kPlattform,
-    l.kLieferschein
-FROM dbo.tVersand v
-JOIN dbo.tLieferschein l ON l.kLieferschein = v.kLieferschein
-JOIN Verkauf.tAuftrag a ON a.kAuftrag = l.kBestellung
-WHERE v.kVersand = @kVersand;
-"@
-        [void]$statusInfoCmd.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-        $statusInfoCmd.Parameters["@kVersand"].Value = $kVersand
-
-        $statusReader = $statusInfoCmd.ExecuteReader()
-        if (-not $statusReader.Read()) {
-            $statusReader.Close()
-            throw 'Versandstatus-Queue: Auftrag/Plattform/Lieferschein konnte nicht ermittelt werden.'
-        }
-        $queueAuftrag = if ($statusReader["cAuftragsNr"] -eq [DBNull]::Value) { '' } else { [string]$statusReader["cAuftragsNr"] }
-        $queueShop = if ($statusReader["kShop"] -eq [DBNull]::Value) { $null } else { [int]$statusReader["kShop"] }
-        $queuePlattform = [int]$statusReader["kPlattform"]
-        $queueLieferschein = [int]$statusReader["kLieferschein"]
-        $statusReader.Close()
-
-        if ($queuePlattform -le 0) {
-            Write-Log "WARNUNG Versandstatus: Plattform ist 0/leer. Auftrag=$queueAuftrag Lieferschein=$queueLieferschein" 'WARN'
-        }
-
-        $amazonHandled = $false
-        $queueAffected = 0
-        $scxAffected = 0
-
-        $amazonPlatformId = 0
-        if ($script:Config.PSObject.Properties.Name -contains 'AmazonPlatformId') {
-            $amazonPlatformId = [int]$script:Config.AmazonPlatformId
-        }
-        if ($amazonPlatformId -gt 0 -and $queuePlattform -eq $amazonPlatformId) {
-            # Amazon verwendet in diesem Mandanten NICHT die allgemeine tQueue fuer die Versandmeldung.
-            # Referenz: SQL-Profiler 05.10.2026, Auftrag 4952 / Lieferschein 3133.
-            # JTL schreibt pf_amazon_bestellung_versand, setzt pf_amazon_bestellung.nStatus=25
-            # und aktualisiert die Amazon-Position ueber Amazon.spAmazonPosAendern.
-            $amazonInfoCmd = $cn.CreateCommand()
-            $amazonInfoCmd.Transaction = $tx
-            $amazonInfoCmd.CommandText = @"
-DECLARE @ExternalOrder nvarchar(255);
-SELECT TOP 1 @ExternalOrder = a.cExterneAuftragsnummer
-FROM dbo.tVersand v
-JOIN dbo.tLieferschein l ON l.kLieferschein = v.kLieferschein
-JOIN Verkauf.tAuftrag a ON a.kAuftrag = l.kBestellung
-WHERE v.kVersand = @kVersand;
-
-DECLARE @OrderColumn sysname;
-SELECT TOP 1 @OrderColumn = c.name
-FROM sys.columns c
-JOIN sys.tables t ON t.object_id = c.object_id
-JOIN sys.schemas s ON s.schema_id = t.schema_id
-WHERE s.name = N'dbo'
-  AND t.name = N'pf_amazon_bestellung'
-  AND c.name IN (N'cAmazonOrderId',N'cAmazonOrderID',N'cOrderId',N'cOrderID',N'cBestellNr')
-ORDER BY CASE c.name
-    WHEN N'cAmazonOrderId' THEN 1
-    WHEN N'cAmazonOrderID' THEN 2
-    WHEN N'cOrderId' THEN 3
-    WHEN N'cOrderID' THEN 4
-    ELSE 5 END;
-
-IF @OrderColumn IS NULL
-    THROW 51000, 'Amazon: Keine bekannte Order-ID-Spalte in pf_amazon_bestellung gefunden.', 1;
-
-DECLARE @sql nvarchar(max) =
-    N'SELECT TOP 1 b.kAmazonBestellung, @ExternalOrderOut AS cExternalOrder '
-  + N'FROM dbo.pf_amazon_bestellung b WHERE CONVERT(nvarchar(255), b.' + QUOTENAME(@OrderColumn) + N') = @ExternalOrderIn;';
-EXEC sp_executesql @sql,
-    N'@ExternalOrderIn nvarchar(255), @ExternalOrderOut nvarchar(255)',
-    @ExternalOrderIn=@ExternalOrder, @ExternalOrderOut=@ExternalOrder;
-"@
-            [void]$amazonInfoCmd.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-            $amazonInfoCmd.Parameters["@kVersand"].Value = $kVersand
-
-            $amazonReader = $amazonInfoCmd.ExecuteReader()
-            if (-not $amazonReader.Read()) {
-                $amazonReader.Close()
-                throw "Amazon-Versandstatus: Amazon-Bestellung fuer Auftrag=$queueAuftrag / externe Bestellnummer nicht gefunden."
-            }
-            $amazonBestellung = [int]$amazonReader["kAmazonBestellung"]
-            $amazonExternalOrder = if ($amazonReader["cExternalOrder"] -eq [DBNull]::Value) { '' } else { [string]$amazonReader["cExternalOrder"] }
-            $amazonReader.Close()
-
-            # Sicherheitsregel v1.12: Nur eindeutig einpositionige Amazon-Auftraege automatisch melden.
-            # Mehrpositions-/Teillieferungen werden nicht geraten, sondern klar abgebrochen.
-            $amazonPosCmd = $cn.CreateCommand()
-            $amazonPosCmd.Transaction = $tx
-            $amazonPosCmd.CommandText = @"
-SELECT
-    COUNT(*) AS PosCount,
-    MIN(kAmazonBestellungPos) AS kAmazonBestellungPos
-FROM dbo.pf_amazon_bestellungpos
-WHERE kAmazonBestellung = @kAmazonBestellung;
-"@
-            [void]$amazonPosCmd.Parameters.Add("@kAmazonBestellung",[Data.SqlDbType]::Int)
-            $amazonPosCmd.Parameters["@kAmazonBestellung"].Value = $amazonBestellung
-            $amazonPosReader = $amazonPosCmd.ExecuteReader()
-            [void]$amazonPosReader.Read()
-            $amazonPosCount = [int]$amazonPosReader["PosCount"]
-            $amazonBestellungPos = if ($amazonPosReader["kAmazonBestellungPos"] -eq [DBNull]::Value) { 0 } else { [int]$amazonPosReader["kAmazonBestellungPos"] }
-            $amazonPosReader.Close()
-
-            if ($amazonPosCount -ne 1 -or $amazonBestellungPos -le 0) {
-                throw "Amazon-Versandstatus: Auftrag=$queueAuftrag hat $amazonPosCount Amazon-Positionen. v1.12 meldet aus Sicherheitsgruenden nur eindeutige Einpositions-Auftraege automatisch."
-            }
-
-            $amazonShipCmd = $cn.CreateCommand()
-            $amazonShipCmd.Transaction = $tx
-            $amazonShipCmd.CommandText = @"
-IF EXISTS (
-    SELECT 1 FROM dbo.pf_amazon_bestellung_versand
-    WHERE kAmazonBestellungPos = @kAmazonBestellungPos
-      AND kLieferschein = @kLieferschein
-)
-BEGIN
-    -- Bereits angelegt: keinen Doppel-Datensatz erzeugen. Fuer erneute Verarbeitung freigeben.
-    UPDATE dbo.pf_amazon_bestellung_versand
-    SET cCarrierCode = N'DHL',
-        cTrackingNumber = @Tracking,
-        cShipMethod = N'Paket',
-        dShipDate = @ShipDate,
-        dBearbeitet = NULL
-    WHERE kAmazonBestellungPos = @kAmazonBestellungPos
-      AND kLieferschein = @kLieferschein;
-END
-ELSE
-BEGIN
-    INSERT INTO dbo.pf_amazon_bestellung_versand
-        (kAmazonBestellungPos, kLieferschein, nQuantity, kBenutzer,
-         cCarrierCode, cCarrierName, cTrackingNumber, cShipMethod,
-         dShipDate, dBearbeitet,
-         cShipFromAddressName, cShipFromAddressLine1, cShipFromAddressLine2,
-         cShipFromAddressLine3, cShipFromAddressCity, cShipFromAddressCounty,
-         cShipFromAddressStateOrRegion, cShipFromPostalcode, cShipFromCountrycode)
-    SELECT
-         p.kAmazonBestellungPos,
-         @kLieferschein,
-         p.nQuantityPurchased,
-         2,
-         N'DHL', N'', @Tracking, N'Paket',
-         @ShipDate, NULL,
-         N'',N'',N'',N'',N'',N'',N'',N'',N''
-    FROM dbo.pf_amazon_bestellungpos p
-    WHERE p.kAmazonBestellungPos = @kAmazonBestellungPos;
-END;
-
-UPDATE dbo.pf_amazon_bestellung
-SET nStatus = 25
-WHERE kAmazonBestellung = @kAmazonBestellung
-  AND cOrderStatus NOT IN (N'Shipped', N'PartiallyShipped', N'Canceled');
-
-DECLARE
-    @cArtNr nvarchar(100),
-    @cName nvarchar(255),
-    @nQuantityPurchased int,
-    @fItemPrice decimal(18,6),
-    @fItemTax decimal(18,6),
-    @fShippingPrice decimal(18,6),
-    @fShippingTax decimal(18,6),
-    @cOrderItemId nvarchar(30),
-    @cCarrier nvarchar(20),
-    @cTrackingNumber nvarchar(50),
-    @dEstimatedArrivalDate datetime,
-    @cFulfillmentCenterId nvarchar(20),
-    @cFullfillmentChannel nvarchar(20),
-    @cMerchantOrderItemid nvarchar(50),
-    @nErrorCode int,
-    @cErrorMessage nvarchar(2000),
-    @dErrorErstellt datetime,
-    @fGeschenkverpackungKosten decimal(18,6),
-    @cGeschenkverpackungTyp nvarchar(50),
-    @cGrusstext nvarchar(255),
-    @nGeschenk tinyint,
-    @kFulfillmentAuftragPos int,
-    @cCustomUrl nvarchar(255),
-    @cCustomJson nvarchar(max),
-    @cArchiveUrl nvarchar(512),
-    @cShipmentItemId nvarchar(20);
-
-SELECT
-    @cArtNr = ISNULL(cArtNr,N''),
-    @cName = ISNULL(cName,N''),
-    @nQuantityPurchased = ISNULL(nQuantityPurchased,0),
-    @fItemPrice = ISNULL(fItemPrice,0),
-    @fItemTax = ISNULL(fItemTax,0),
-    @fShippingPrice = ISNULL(fShippingPrice,0),
-    @fShippingTax = ISNULL(fShippingTax,0),
-    @cOrderItemId = ISNULL(cOrderItemId,N''),
-    @cCarrier = ISNULL(cCarrier,N''),
-    @cTrackingNumber = ISNULL(cTrackingNumber,N''),
-    @dEstimatedArrivalDate = dEstimatedArrivalDate,
-    @cFulfillmentCenterId = ISNULL(cFulfillmentCenterId,N''),
-    @cFullfillmentChannel = N'',
-    @cMerchantOrderItemid = ISNULL(cMerchantOrderItemid,N''),
-    @nErrorCode = ISNULL(nErrorCode,0),
-    @cErrorMessage = ISNULL(cErrorMessage,N''),
-    @dErrorErstellt = dErrorErstellt,
-    @fGeschenkverpackungKosten = ISNULL(fGeschenkverpackungKosten,0),
-    @cGeschenkverpackungTyp = ISNULL(cGeschenkverpackungTyp,N''),
-    @cGrusstext = ISNULL(cGrusstext,N''),
-    @nGeschenk = ISNULL(nGeschenk,0),
-    @kFulfillmentAuftragPos = ISNULL(kFulfillmentAuftragPos,0),
-    @cCustomUrl = ISNULL(cCustomUrl,N''),
-    @cCustomJson = ISNULL(cCustomJson,N''),
-    @cArchiveUrl = ISNULL(cArchiveUrl,N''),
-    @cShipmentItemId = ISNULL(cShipmentItemId,N'')
-FROM dbo.pf_amazon_bestellungpos
-WHERE kAmazonBestellungPos = @kAmazonBestellungPos;
-
-EXEC Amazon.spAmazonPosAendern
-    @kAmazonBestellungPos=@kAmazonBestellungPos,
-    @kAmazonBestellung=@kAmazonBestellung,
-    @cArtNr=@cArtNr,
-    @cName=@cName,
-    @nQuantityPurchased=@nQuantityPurchased,
-    @fItemPrice=@fItemPrice,
-    @fItemTax=@fItemTax,
-    @fShippingPrice=@fShippingPrice,
-    @fShippingTax=@fShippingTax,
-    @cOrderItemId=@cOrderItemId,
-    @nVersandt=@nQuantityPurchased,
-    @cCarrier=@cCarrier,
-    @cTrackingNumber=@cTrackingNumber,
-    @dEstimatedArrivalDate=@dEstimatedArrivalDate,
-    @cFulfillmentCenterId=@cFulfillmentCenterId,
-    @cFullfillmentChannel=@cFullfillmentChannel,
-    @cMerchantOrderItemid=@cMerchantOrderItemid,
-    @nErrorCode=@nErrorCode,
-    @cErrorMessage=@cErrorMessage,
-    @dErrorErstellt=@dErrorErstellt,
-    @fGeschenkverpackungKosten=@fGeschenkverpackungKosten,
-    @cGeschenkverpackungTyp=@cGeschenkverpackungTyp,
-    @cGrusstext=@cGrusstext,
-    @nGeschenk=@nGeschenk,
-    @kFulfillmentAuftragPos=@kFulfillmentAuftragPos,
-    @cCustomUrl=@cCustomUrl,
-    @cCustomJson=@cCustomJson,
-    @cArchiveUrl=@cArchiveUrl,
-    @cShipmentItemId=@cShipmentItemId;
-"@
-            [void]$amazonShipCmd.Parameters.Add("@kAmazonBestellungPos",[Data.SqlDbType]::Int)
-            $amazonShipCmd.Parameters["@kAmazonBestellungPos"].Value = $amazonBestellungPos
-            [void]$amazonShipCmd.Parameters.Add("@kAmazonBestellung",[Data.SqlDbType]::Int)
-            $amazonShipCmd.Parameters["@kAmazonBestellung"].Value = $amazonBestellung
-            [void]$amazonShipCmd.Parameters.Add("@kLieferschein",[Data.SqlDbType]::Int)
-            $amazonShipCmd.Parameters["@kLieferschein"].Value = $queueLieferschein
-            [void]$amazonShipCmd.Parameters.Add("@Tracking",[Data.SqlDbType]::NVarChar,255)
-            $amazonShipCmd.Parameters["@Tracking"].Value = $Tracking
-            [void]$amazonShipCmd.Parameters.Add("@ShipDate",[Data.SqlDbType]::DateTime)
-            $amazonShipCmd.Parameters["@ShipDate"].Value = $dbVersendet
-            [void]$amazonShipCmd.ExecuteNonQuery()
-            $amazonHandled = $true
-        }
-        else {
-            # Andere Verkaufskanaele: vorhandene JTL-Queue/SCX-Logik beibehalten.
-            $queueCmd = $cn.CreateCommand()
-            $queueCmd.Transaction = $tx
-            $queueCmd.CommandText = @"
-INSERT INTO dbo.tQueue
-    (kShop, kPlattform, cName, kWert, nAction, kOption1, kOption2, nInBearbeitung)
-VALUES
-    (@kShop, @kPlattform, N'tLieferschein', @kLieferschein, 1, 0, 0, 0);
-"@
-            [void]$queueCmd.Parameters.Add("@kShop",[Data.SqlDbType]::Int)
-            if ($null -eq $queueShop) {
-                $queueCmd.Parameters["@kShop"].Value = [DBNull]::Value
-            } else {
-                $queueCmd.Parameters["@kShop"].Value = $queueShop
-            }
-            [void]$queueCmd.Parameters.Add("@kPlattform",[Data.SqlDbType]::Int)
-            $queueCmd.Parameters["@kPlattform"].Value = $queuePlattform
-            [void]$queueCmd.Parameters.Add("@kLieferschein",[Data.SqlDbType]::Int)
-            $queueCmd.Parameters["@kLieferschein"].Value = $queueLieferschein
-
-            $queueAffected = $queueCmd.ExecuteNonQuery()
-            if ($queueAffected -ne 1) {
-                throw "Versandstatus-Queue hat $queueAffected Zeilen angelegt; erwartet 1."
-            }
-
-            $scxCmd = $cn.CreateCommand()
-            $scxCmd.Transaction = $tx
-            $scxCmd.CommandText = @"
-MERGE SCX.tOrderShipping AS Target
-USING (
-    SELECT
-        o.kOrder AS kOrder,
-        l.kLieferschein,
-        GETUTCDATE() AS dCreatedAtUtc
-    FROM dbo.tVersand v
-    JOIN dbo.tLieferschein l ON l.kLieferschein = v.kLieferschein
-    JOIN Verkauf.tAuftrag a ON a.kAuftrag = l.kBestellung
-    JOIN SCX.tOrder o ON o.kAuftrag = a.kAuftrag
-    WHERE v.kVersand = @kVersand
-) AS Shipping
-ON Shipping.kLieferschein = Target.kLieferschein
-WHEN MATCHED THEN
-    UPDATE SET Target.dUploadedAtUtc = NULL, Target.nCount = 0
-WHEN NOT MATCHED BY TARGET THEN
-    INSERT (kOrder, kLieferschein, dCreatedAtUtc)
-    VALUES (Shipping.kOrder, Shipping.kLieferschein, Shipping.dCreatedAtUtc);
-"@
-            [void]$scxCmd.Parameters.Add("@kVersand",[Data.SqlDbType]::Int)
-            $scxCmd.Parameters["@kVersand"].Value = $kVersand
-            $scxAffected = $scxCmd.ExecuteNonQuery()
-        }
-
-        $queueShopText = if ($null -eq $queueShop) { 'NULL' } else { [string]$queueShop }
-        if ($amazonHandled) {
-            Write-Log "Amazon-Versandstatus SQL vorgemerkt: Auftrag=$queueAuftrag Plattform=$amazonPlatformId Lieferschein=$queueLieferschein Tracking=$Tracking"
-        } else {
-            Write-Log "Versandstatus-Queue OK: Auftrag=$queueAuftrag Plattform=$queuePlattform Shop=$queueShopText Lieferschein=$queueLieferschein"
-            if ($scxAffected -gt 0) {
-                Write-Log "SCX-Versandstatus OK: Auftrag=$queueAuftrag Lieferschein=$queueLieferschein Treffer=$scxAffected"
-            } else {
-                Write-Log "SCX-Versandstatus: kein SCX.tOrder-Treffer fuer Auftrag=$queueAuftrag Plattform=$queuePlattform (kein Fehler)."
-            }
-        }
-        } else {
-            Write-Log 'Experimentelle SQL-Versandstatus-Queue deaktiviert. Tracking wurde in JTL eingetragen; Kanal-Rueckmeldung gesondert ausloesen.' 'WARN'
-        }
-        # kReturnVersandart bei OTTO bewusst nicht setzen.
-        $tx.Commit()
-    }
-    catch {
-        try { $tx.Rollback() } catch {}
-        throw
-    }
-    finally {
-        $cn.Close()
-    }
-}
-
 function Read-SemicolonCsv {
     param([string]$Path)
     $bytes = [IO.File]::ReadAllBytes($Path)
@@ -1142,7 +510,7 @@ function Build-Consignee {
 
 function Get-Shipper {
     if ($script:Config.Environment -eq 'Sandbox') {
-        # Eine Absenderreferenz aus dem eigenen GKP existiert in der gemeinsamen DHL-Sandbox nicht.
+        # Eine Absenderreferenz aus dem echten GKP existiert in der gemeinsamen DHL-Sandbox nicht.
         # Deshalb verwenden wir dort eine neutrale Testadresse. In Produktion wird wieder shipperRef verwendet.
         if ($script:Config.PSObject.Properties['SandboxShipper']) {
             $ss = $script:Config.SandboxShipper
@@ -1186,21 +554,11 @@ function Build-OrderBody {
         }
     }
 
-    # Warenpost International (V66WPI) wird hier mit PREMIUM gebucht.
+    # Warenpost International (V66WPI) wird in dieser Version als PREMIUM gebucht.
     # Premium aktiviert die für das Zielland verfügbaren Premium-Leistungen, insbesondere Tracking.
     if ($Product -eq 'V66WPI') {
         $shipment.services = [ordered]@{
             premium = $true
-        }
-    }
-
-    if (([string]$Row.Versandart).Trim() -eq 'DHL Otto') {
-        $shipment.services = [ordered]@{
-            dhlRetoure = [ordered]@{
-                billingNumber = (Get-OttoReturnBillingNumber)
-                refNo         = ([string]$Row.Lieferschein)
-                returnAddress = (Get-OttoReturnAddress)
-            }
         }
     }
 
@@ -1333,13 +691,16 @@ function Save-Label {
     $safeRef = ($PaketRef -replace '[^A-Za-z0-9_-]','_')
     $safeLs  = ($Lieferschein -replace '[^A-Za-z0-9_-]','_')
     $labelPath = Join-Path $script:Config.LabelPath ("{0}_{1}.pdf" -f $safeLs,$safeRef)
+    $tempLabel = $labelPath + "." + [guid]::NewGuid().ToString("N") + ".tmp"
     if ($Item.label.b64) {
-        [IO.File]::WriteAllBytes($labelPath, [Convert]::FromBase64String([string]$Item.label.b64))
+        [IO.File]::WriteAllBytes($tempLabel, [Convert]::FromBase64String([string]$Item.label.b64))
     } elseif ($Item.label.url) {
-        Invoke-WebRequest -Uri ([string]$Item.label.url) -OutFile $labelPath
+        Invoke-WebRequest -Uri ([string]$Item.label.url) -OutFile $tempLabel
     } else {
         throw 'Label enthält weder b64 noch URL.'
     }
+    if ((Get-Item -LiteralPath $tempLabel).Length -lt 5) { throw "Leeres Label; Reservierung bleibt erhalten." }
+    [IO.File]::Move($tempLabel,$labelPath)
     if ([bool]$script:Config.AutoPrintPdf) {
         try { Start-Process -FilePath $labelPath -Verb Print | Out-Null } catch { Write-Log "Automatischer PDF-Druck fehlgeschlagen: $($_.Exception.Message)" 'WARN' }
     }
@@ -1367,6 +728,90 @@ function Get-StateFile {
     return Join-Path $envStatePath ($safe + '.json')
 }
 
+# CSV pilot: a reservation exists before the DHL creation request. Never retry a
+# creation automatically after an uncertain result, even after a process crash.
+function Write-CsvPilotState {
+    param([string]$Path, $State, [switch]$Create)
+    $temp = $Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    $backup = $Path + '.' + [guid]::NewGuid().ToString('N') + '.bak'
+    $committed = $false
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes(($State | ConvertTo-Json -Depth 8))
+        $stream = [IO.File]::Open($temp, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+        if ($Create) { [IO.File]::Move($temp,$Path) }
+        else { [IO.File]::Replace($temp,$Path,$backup) }
+        $committed = $true
+    } catch {
+        # Preserve evidence of a successful DHL response if the NAS update fails.
+        Write-Log "Statusspeicherung fehlgeschlagen. Keine Neubuchung. Status=$Path; Wiederherstellungsdatei=$temp; Backup=$backup" 'ERROR'
+        throw
+    } finally {
+        if ($committed -and (Test-Path -LiteralPath $temp)) { Remove-Item -LiteralPath $temp -Force }
+    }
+}
+
+function Test-CsvPilotStateStorage {
+    param([string]$StateFile)
+    $probe = Join-Path ([IO.Path]::GetDirectoryName($StateFile)) ('_storage_probe_' + [guid]::NewGuid().ToString('N'))
+    try {
+        Write-CsvPilotState $probe ([ordered]@{status='PROBE_CREATED'}) -Create
+        Write-CsvPilotState $probe ([ordered]@{status='PROBE_REPLACED'})
+        $check = Get-Content -LiteralPath $probe -Raw | ConvertFrom-Json
+        if ($check.status -ne 'PROBE_REPLACED') { throw 'NAS Statusprobe fehlgeschlagen.' }
+        Write-Log 'NAS Statusspeicherung: Create/Replace/Read OK.'
+    } finally {
+        Get-ChildItem -LiteralPath ([IO.Path]::GetDirectoryName($probe)) -Filter (([IO.Path]::GetFileName($probe)) + '*') | Remove-Item -Force
+    }
+}
+
+function Publish-JtlTrackingCsv {
+    param([string]$PaketRef,[string]$Tracking)
+    if ($script:Config.Environment -ne 'Production') { throw 'Sandbox-Tracking darf nicht in den JTL-Import gelangen.' }
+    if ($PaketRef -cnotmatch '^P[1-9][0-9]*$' -or $Tracking -notmatch '^[A-Za-z0-9-]+$') { throw 'Ungueltige Paket-ID oder Trackingnummer.' }
+    $file = Join-Path $script:Config.ImportPath ("tracking_CSV_{0}.csv" -f $PaketRef)
+    $temp = Join-Path $script:Config.ImportPath ('.tracking_' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [IO.File]::WriteAllText($temp,"PaketRef;Tracking`r`n$PaketRef;$Tracking`r`n",[Text.Encoding]::ASCII)
+        [IO.File]::Move($temp,$file)
+    } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force } }
+    return $file
+}
+
+# A local file guard is not proof that JTL or another shipping system has never booked a parcel.
+function Assert-NoBookingEvidence {
+    param([string]$PaketRef,[string]$Lieferschein,[string]$StateFile)
+    if ($PaketRef -cnotmatch '^P[1-9][0-9]*$') { throw 'Ungueltige PaketRef.' }
+    $stateDir = [IO.Path]::GetDirectoryName($StateFile)
+    if ((Test-Path -LiteralPath $StateFile) -or @(Get-ChildItem -LiteralPath $stateDir -Filter ($PaketRef + '.json.*') -File -ErrorAction Stop).Count -gt 0) {
+        throw "${PaketRef}: vorhandener Buchungsstatus oder Recovery-Datei. Keine neue Buchung."
+    }
+    if (@(Get-ChildItem -LiteralPath $script:Config.LabelPath -Filter "*_${PaketRef}.pdf" -File -ErrorAction Stop).Count -gt 0) { throw 'Vorhandenes Label. Keine neue Buchung.' }
+    $existingCsv = Join-Path $script:Config.ImportPath ("tracking_CSV_{0}.csv" -f $PaketRef)
+    if (Test-Path -LiteralPath $existingCsv) { throw 'Vorhandene Importdatei. Keine neue Buchung.' }
+    $backupDir = Join-Path $script:Config.ImportPath 'backup'
+    if ((Test-Path -LiteralPath $backupDir) -and @(Get-ChildItem -LiteralPath $backupDir -Filter "tracking_*_${PaketRef}_*.csv" -File -ErrorAction Stop).Count -gt 0) { throw 'Vorhandene Tracking-Sicherung. Keine neue Buchung.' }
+}
+
+# Monitor only files still waiting; disappearance is NOT a JTL acknowledgement.
+$script:WarnedImports = @{}
+function Watch-JtlImportQueue {
+    $present = @{}
+    foreach ($f in @(Get-ChildItem -LiteralPath $script:Config.ImportPath -Filter 'tracking_CSV_P*.csv' -File -ErrorAction Stop)) {
+        $present[$f.Name] = $true
+        if (((Get-Date) - $f.LastWriteTime).TotalMinutes -ge 5 -and -not $script:WarnedImports.ContainsKey($f.Name)) {
+            Write-Log "JTL-Import wartet seit mindestens 5 Minuten: $($f.Name). JTL pruefen; keine Neubuchung." 'WARN'
+            $script:WarnedImports[$f.Name] = $true
+        }
+    }
+    foreach ($name in @($script:WarnedImports.Keys)) {
+        if (-not $present.ContainsKey($name)) {
+            Write-Log "Importdatei nicht mehr vorhanden: $name. JTL-Uebernahme nicht technisch bestaetigt."
+            $script:WarnedImports.Remove($name)
+        }
+    }
+}
+
 function Process-Row {
     param($Row, [string]$SourceFile)
 
@@ -1386,43 +831,16 @@ function Process-Row {
 
     $stateFile = Get-StateFile $paketRef
 
-    # Wenn DHL bereits erfolgreich gebucht wurde, aber das JTL-Update fehlgeschlagen ist,
-    # niemals erneut bei DHL buchen. Nur das JTL-Tracking wird nachgeholt.
-    if ((-not $ValidateOnly) -and (Test-Path $stateFile)) {
-        $state = Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        $status = [string]$state.status
-
-        if ($status -in @('DHL_CREATED_PENDING_JTL','OTTO_DHL_CREATED_PENDING_JTL')) {
-            $pendingReturn = ''
-            if ($state.PSObject.Properties['returnTracking']) {
-                $pendingReturn = [string]$state.returnTracking
-            }
-
-            Write-Log "$paketRef / ${ls}: DHL wurde bereits gebucht. Hole nur das JTL-Tracking-Update nach ..."
-            Write-JtlTracking $paketRef $ls $versandart ([string]$state.tracking) $pendingReturn
-
-            $state.status = 'COMPLETED'
-            $state.jtlDbUpdatedAt = (Get-Date).ToString('o')
-            $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
-
-            Write-Log "$paketRef / ${ls}: JTL-Update nachgeholt. Keine neue DHL-Buchung."
-            return
-        }
-
-        Write-Log "$paketRef wurde bereits gebucht ($($state.tracking)). Überspringe Doppelbuchung."
-        return
+    if ($paketRef -cnotmatch '^P[1-9][0-9]*$') { throw 'PaketRef muss P gefolgt von der internen Paketnummer sein.' }
+    if ($isOtto) { throw 'DHL Otto wird im SQL-freien Pilotbetrieb nicht unterstuetzt. Keine DHL-Buchung.' }
+    if ($AutoProduction -and $versandart -cne 'Versicherter Versand DHL') {
+        throw 'CSV-Automatik: nur getesteter DHL Paket DE Versand freigegeben. Andere Versandarten manuell pruefen; keine Buchung.'
     }
-
-    if ($ValidateOnly -and (Test-Path $stateFile)) {
-        Write-Log "$paketRef ist bereits in der Buchungshistorie vorhanden; für ValidateOnly wird die Historie bewusst ignoriert."
-    }
-
-    # Vor jeder echten DHL-Buchung muss JTL erreichbar sein und PaketRef/Lieferschein/Versandart
-    # müssen exakt passen. Dadurch erzeugen wir keine DHL-Sendung, wenn der spätere JTL-Rückweg
-    # schon vorab offensichtlich nicht funktionieren kann.
     if (-not $ValidateOnly) {
-        [void](Assert-JtlTrackingTarget $paketRef $ls $versandart $isOtto)
-        Write-Log "$paketRef / ${ls}: JTL-Ziel geprüft und Trackingfeld leer. PaketRef -> tVersand eindeutig."
+        Assert-NoBookingEvidence $paketRef $ls $stateFile
+        $probe = Join-Path $script:Config.ImportPath ('.probe_' + [guid]::NewGuid().ToString('N') + '.tmp')
+        try { [IO.File]::WriteAllText($probe,'probe') } finally { if (Test-Path -LiteralPath $probe) { Remove-Item -LiteralPath $probe -Force } }
+        Write-Log "$paketRef / ${ls}: CSV-Betrieb; keine direkte JTL-Abfrage. Nur offene, ungebuchte Pakete exportieren."
     }
 
     $billing = Get-BillingNumber $productInfo.Product
@@ -1441,78 +859,53 @@ function Process-Row {
             }
         }
     } catch { }
-    Write-Log "$paketRef / ${ls}: API-Parameter: Produkt=$($productInfo.Product) | Billing=$billing | Premium=$premiumLog"
+    Write-Log "$paketRef / ${ls}: API-Parameter: Produkt=$($productInfo.Product) | Premium=$premiumLog"
 
     Write-Log "$paketRef / ${ls}: validiere $($productInfo.Name), $weight kg, Environment=$($script:Config.Environment) ..."
     $validation = Invoke-DhlOrder $body $true
     [void](Assert-DhlResponseOK $validation 'Validierung')
 
     if ($ValidateOnly) {
-        if ($isOtto) {
-            Write-Log "$paketRef / ${ls}: OTTO PRODUCTION-VALIDIERUNG OK (70101 + dhlRetoure 70702). Keine Sendung erzeugt." 'INFO'
-        } else {
-            Write-Log "$paketRef / ${ls}: PRODUCTION-VALIDIERUNG OK. Keine Sendung erzeugt." 'INFO'
-        }
+        Test-CsvPilotStateStorage $stateFile
+        Write-Log "$paketRef / ${ls}: VALIDIERUNG OK. Keine Sendung erzeugt." 'INFO'
         return
     }
 
-    Write-Log "$paketRef / ${ls}: Validierung OK. Erzeuge $($script:Config.Environment)-Label ..."
+    $pendingState = [ordered]@{
+        paketRef = $paketRef
+        lieferschein = $ls
+        versandart = $versandart
+        tracking = ''
+        returnTracking = ''
+        product = $productInfo.Product
+        country = $productInfo.Country
+        environment = [string]$script:Config.Environment
+        labelPath = ''
+        trackingBackup = ''
+        importFile = ''
+        sourceFile = $SourceFile
+        status = 'DHL_BOOKING_RESERVED'
+        createdAt = (Get-Date).ToString('o')
+    }
+    Test-CsvPilotStateStorage $stateFile
+    Write-CsvPilotState $stateFile $pendingState -Create
+    Write-Log "$paketRef / ${ls}: Buchung reserviert. Erzeuge DHL-Label einmalig."
     $created = Invoke-DhlOrder $body $false
     $item = Assert-DhlResponseOK $created 'Erstellung'
-
     $tracking = [string]$item.shipmentNo
-    if ([string]::IsNullOrWhiteSpace($tracking)) {
-        throw 'DHL hat keine Sendungsnummer zurückgegeben.'
-    }
+    if ([string]::IsNullOrWhiteSpace($tracking)) { throw 'DHL hat keine Sendungsnummer zurueckgegeben; Reservierung bleibt bestehen.' }
+    $pendingState.tracking = $tracking
+    $pendingState.status = 'DHL_CREATED_PENDING_CSV'
+    Write-CsvPilotState $stateFile $pendingState
 
-    $returnTracking = ''
-    if ($isOtto) {
-        $returnTracking = [string]$item.returnShipmentNo
-        if ([string]::IsNullOrWhiteSpace($returnTracking)) {
-            throw 'DHL hat für DHL Otto keine returnShipmentNo zurückgegeben.'
-        }
-    }
-
-    $label = Save-Label $item $paketRef $ls
-    $trackingBackup = Write-TrackingBackup $paketRef $ls $tracking
-
-    # DHL-Nummern dauerhaft sichern, BEVOR JTL beschrieben wird.
-    # Falls das DB-Update danach scheitert, wird beim nächsten Worker-Lauf
-    # ausschließlich das JTL-Update wiederholt.
-    $pendingState = [ordered]@{
-        paketRef       = $paketRef
-        lieferschein   = $ls
-        versandart     = $versandart
-        tracking       = $tracking
-        returnTracking = $returnTracking
-        product        = $productInfo.Product
-        country        = $productInfo.Country
-        environment    = [string]$script:Config.Environment
-        labelPath      = $label
-        trackingBackup = $trackingBackup
-        sourceFile     = $SourceFile
-        status         = 'DHL_CREATED_PENDING_JTL'
-        createdAt      = (Get-Date).ToString('o')
-    }
-    $pendingState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
-
-    if ($isOtto) {
-        Write-Log "$paketRef / ${ls}: DHL OK. Hinweg=$tracking, OTTO-Retoure=$returnTracking. Schreibe beide Nummern direkt nach JTL ..."
-    } else {
-        Write-Log "$paketRef / ${ls}: DHL OK. Tracking=$tracking. Schreibe Tracking direkt nach JTL ..."
-    }
-
-    Write-JtlTracking $paketRef $ls $versandart $tracking $returnTracking
-
-    $pendingState.status = 'COMPLETED'
-    $pendingState.jtlDbUpdatedAt = (Get-Date).ToString('o')
-    $pendingState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
-
-    if ($isOtto) {
-        Write-Log "${paketRef}: OTTO KOMPLETT. Hinweg=$tracking, Retoure=$returnTracking, JTL automatisch aktualisiert."
-    } else {
-        Write-Log "${paketRef}: KOMPLETT. Tracking=$tracking direkt in JTL eingetragen. Kein Versanddatenimport nötig."
-    }
+    $pendingState.labelPath = Save-Label $item $paketRef $ls
+    $pendingState.trackingBackup = Write-TrackingBackup $paketRef $ls $tracking
+    $pendingState.status = 'CSV_PUBLISH_PENDING'
+    Write-CsvPilotState $stateFile $pendingState
+    $pendingState.importFile = Publish-JtlTrackingCsv $paketRef $tracking
+    $pendingState.status = 'CSV_PUBLISHED_UNCONFIRMED'
+    Write-CsvPilotState $stateFile $pendingState
+    Write-Log "${paketRef}: CSV bereitgestellt. Tracking=$tracking. JTL-Import und Versanddatum manuell kontrollieren."
 }
 
 function Process-File {
@@ -1522,7 +915,7 @@ function Process-File {
     Write-Log "Verarbeite $name"
     try {
         $rows = @(Read-SemicolonCsv $Path)
-        if ($rows.Count -eq 0) { throw 'CSV enthält keine Datensätze.' }
+        if ($rows.Count -ne 1) { throw 'CSV-Betrieb erlaubt genau ein Paket pro Exportdatei; Mehrpaketsendungen manuell pruefen.' }
         foreach ($row in $rows) { Process-Row $row $name }
         if ($ValidateOnly) {
             Write-Log "$name -> Nur validiert, Datei bleibt unverändert."
@@ -1542,14 +935,15 @@ function Process-File {
             if (Test-Path $dest) { $dest = Join-Path $script:Config.ErrorPath (([IO.Path]::GetFileNameWithoutExtension($name)) + '_' + (Get-Date -Format 'yyyyMMdd_HHmmssfff') + '.csv') }
             Move-Item -LiteralPath $Path -Destination $dest
         }
+        throw
     }
 }
 
 
 function Acquire-AutoProductionLock {
-    if (-not $AutoProduction) { return }
+    # Also lock the manual pilot against a running automatic worker.
 
-        $lockDir = Join-Path $env:LOCALAPPDATA 'JTL-DHL-Worker'
+    $lockDir = Join-Path $env:LOCALAPPDATA 'NikuTRAX-DHL-Worker'
     if (-not (Test-Path $lockDir)) {
         New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
     }
@@ -1571,24 +965,70 @@ function Acquire-AutoProductionLock {
     }
 }
 
+# Separate opt-in: the existing AutoProductionEnabled alone is insufficient.
 $script:Config = Read-Config
+if ($CheckDuplicateOnly) {
+    if ($AutoProduction -or $ApproveProductionShipment -or $ValidateOnly -or $Once -or $SpecificFile -cnotmatch '^P[1-9][0-9]*$') {
+        throw 'Nur -CheckDuplicateOnly -SpecificFile P1234 (PaketRef), ohne weitere Modi.'
+    }
+    # No API call, no import, no booking, no export processing.
+    $ref = $SpecificFile
+    $stateFile = Join-Path (Join-Path $script:Config.StatePath $script:Config.Environment) ($ref + '.json')
+    try { Assert-NoBookingEvidence $ref '' $stateFile; Write-Host 'KEIN LOKALER BUCHUNGSNACHWEIS. Keine Buchung ausgefuehrt.' }
+    catch { Write-Host ('BUCHUNG GESPERRT: ' + $_.Exception.Message); if (-not (Test-Path -LiteralPath $stateFile)) { throw } }
+    exit 0
+}
+if ($AutoProduction) {
+    if ($SpecificFile -or $ApproveProductionShipment -or $ValidateOnly) { throw 'Automatikmodus darf nicht mit Einzeldatei, Freigabe oder Validierung kombiniert werden.' }
+    if ($script:Config.Environment -ne 'Production') { throw 'CSV-Automatik nur fuer Production.' }
+    if (-not $script:Config.PSObject.Properties['CsvAutomationEnabled'] -or ($script:Config.CsvAutomationEnabled -isnot [bool] -or -not $script:Config.CsvAutomationEnabled)) {
+        throw 'CSV-Automatik gesperrt: CsvAutomationEnabled muss true sein.'
+    }
+    if (-not $script:Config.PSObject.Properties['CsvAutomationNotBefore']) { throw 'CsvAutomationNotBefore fehlt. Altdateien vor Freigabe pruefen.' }
+    $script:Cutoff = [DateTimeOffset]::ParseExact([string]$script:Config.CsvAutomationNotBefore,'o',[Globalization.CultureInfo]::InvariantCulture)
+    if ($script:Cutoff -gt [DateTimeOffset]::Now) { throw 'CsvAutomationNotBefore liegt in der Zukunft.' }
+} elseif ([string]::IsNullOrWhiteSpace($SpecificFile)) {
+    throw 'Einzeldatei mit -ValidateOnly oder -ApproveProductionShipment angeben.'
+}
 Ensure-Directories
 Assert-Config
 Acquire-AutoProductionLock
-Write-Log "JTL DHL Community Worker v1.14 gestartet. Environment=$($script:Config.Environment), ShipperRef=$($script:Config.ShipperRef), ValidateOnly=$ValidateOnly, AutoProduction=$AutoProduction"
-Write-Log "Export: $($script:Config.ExportPath)"
-
-if (-not [string]::IsNullOrWhiteSpace($SpecificFile)) {
-    $resolved = $SpecificFile
-    if (-not [IO.Path]::IsPathRooted($resolved)) { $resolved = Join-Path $script:Config.ExportPath $resolved }
-    if (-not (Test-Path $resolved)) { throw "SpecificFile nicht gefunden: $resolved" }
-    Process-File $resolved
-    exit 0
-}
-
-while ($true) {
-    $files = @(Get-ChildItem -LiteralPath $script:Config.ExportPath -Filter '*.csv' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime)
-    foreach ($f in $files) { Process-File $f.FullName }
-    if ($Once) { break }
-    Start-Sleep -Seconds ([int]$script:Config.PollSeconds)
+$script:NasLock = $null
+try {
+    # Cross-user / cross-host lock for this version; old worker must remain stopped.
+    $nasLockPath = Join-Path $script:Config.StatePath 'csv-production-worker.lock'
+    $script:NasLock = [IO.File]::Open($nasLockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    Write-Log "NikuTRAX DHL Worker v1.15-beta.1 CSV-Automatik gestartet. Environment=$($script:Config.Environment), ValidateOnly=$ValidateOnly, AutoProduction=$AutoProduction"
+    Write-Log "Export: $($script:Config.ExportPath)"
+    if (-not $AutoProduction) {
+        $resolved = $SpecificFile
+        if (-not [IO.Path]::IsPathRooted($resolved)) { $resolved = Join-Path $script:Config.ExportPath $resolved }
+        if (-not (Test-Path -LiteralPath $resolved)) { throw "SpecificFile nicht gefunden: $resolved" }
+        $full = [IO.Path]::GetFullPath($resolved)
+        $parent = [IO.Path]::GetFullPath($script:Config.ExportPath).TrimEnd('\')
+        if ([IO.Path]::GetDirectoryName($full).TrimEnd('\') -ine $parent -or [IO.Path]::GetExtension($full) -ine '.csv') { throw 'Nur CSV-Dateien direkt im Exportordner.' }
+        Process-File $resolved
+    } else {
+        $poll = [Math]::Max(3,[int]$script:Config.PollSeconds)
+        $oldReported = @{}
+        do {
+            Watch-JtlImportQueue
+            foreach ($file in @(Get-ChildItem -LiteralPath $script:Config.ExportPath -Filter '*.csv' -File -ErrorAction Stop | Sort-Object LastWriteTime,Name)) {
+                if ([DateTimeOffset]$file.LastWriteTime -lt $script:Cutoff) {
+                    if (-not $oldReported.ContainsKey($file.Name)) { Write-Log "Altdatei gesperrt, manuell pruefen: $($file.Name)" 'WARN'; $oldReported[$file.Name] = $true }
+                    continue
+                }
+                try { Process-File $file.FullName }
+                catch {
+                    # Process-File quarantines failed files. If that failed, stop rather than retry.
+                    if (Test-Path -LiteralPath $file.FullName) { throw "Fehlerdatei konnte nicht archiviert werden. Automatik gestoppt: $($file.Name)" }
+                    Write-Log "Auftrag in Fehlerordner; keine automatische Neubuchung: $($file.Name)" 'WARN'
+                }
+            }
+            if (-not $Once) { Start-Sleep -Seconds $poll }
+        } while (-not $Once)
+    }
+} finally {
+    if ($null -ne $script:NasLock) { $script:NasLock.Dispose() }
+    $script:ProductionLockStream.Dispose()
 }
