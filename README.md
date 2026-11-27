@@ -10,6 +10,8 @@ JTL-Wawi exportiert ein Paket als CSV. Der Worker validiert die Sendung, bucht e
 
 Die private Pilotversion v1.12e wurde am 27.11.2026 mit JTL-Wawi 2.1.2 im DHL-Inlandsversand erfolgreich im Automatikbetrieb getestet. Der öffentliche Entwicklungsstand wurde davon abgeleitet; installationsbezogene Abrechnungs- und Absenderdaten wurden entfernt. Die öffentliche Variante benötigt eigene erneute Tests.
 
+**Amazon-Praxistest (27.11.2026):** Für die private SQL-freie Pilotversion v1.12e unter JTL-Wawi 2.1.2 wurde die erfolgreiche Amazon-Versandbestätigung vom Betreiber gemeldet. Die Marktplatzmeldung erfolgt über JTL, nicht durch einen direkten Amazon-Aufruf des Workers. Dies ist kein separater Praxistest der öffentlichen v1.15-beta.1.
+
 ## Einstieg
 
 1. [CSV-Installations- und Migrationsanleitung](docs/CSV-Setup.md) lesen.
@@ -24,7 +26,7 @@ Die Beispielkonfiguration erlaubt keine Production-Buchungen und keine Automatik
 
 - Automatik: genau ein Paket je Exportdatei, Versandart `Versicherter Versand DHL`, Deutschland (V01PAK).
 - Andere Versandarten, internationale Sendungen, Kleinpaket, Premium und Mehrpaketverarbeitung sind nicht für den unbeaufsichtigten Betrieb freigegeben.
-- Die kombinierte OTTO-Retourenbuchung ist gesperrt. Marktplatzstatus und Retourenrückmeldung sind nicht abschließend geprüft.
+- Die kombinierte OTTO-Retourenbuchung ist gesperrt. Die Retourenrückmeldung und weitere Marktplatzprozesse sind nicht abschließend geprüft; siehe Amazon-Praxistest oben.
 - Das vorhandene PrintAgent-Zubehör bleibt erhalten; dessen Integration mit der neuen Version ist separat zu testen.
 - Der Worker hat keine technische Importquittung von JTL. Das Verschwinden einer CSV allein ist kein Erfolgsnachweis; Trackingnummer, Versanddatum und gegebenenfalls Marktplatzstatus kontrollieren.
 
