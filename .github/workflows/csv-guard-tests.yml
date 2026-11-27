@@ -1,0 +1,13 @@
+name: CSV booking guard tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  guards:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test local booking guards without DHL
+        shell: powershell
+        run: .\tests\Test-CsvBookingGuards.ps1
