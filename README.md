@@ -12,6 +12,8 @@ Die private Pilotversion v1.12e wurde am 27.11.2026 mit JTL-Wawi 2.1.2 im DHL-In
 
 **Amazon-Praxistest (27.11.2026):** Für die private SQL-freie Pilotversion v1.12e unter JTL-Wawi 2.1.2 wurde die erfolgreiche Amazon-Versandbestätigung vom Betreiber gemeldet. Die Marktplatzmeldung erfolgt über JTL, nicht durch einen direkten Amazon-Aufruf des Workers. Dies ist kein separater Praxistest der öffentlichen v1.15-beta.1.
 
+**Versionshinweis (27.11.2026):** In der privaten Pilotinstallation v1.12e mit JTL-Wawi 2.1.2 funktionierten der automatische Versanddatenimport und die Amazon-Versandbestätigung. Bei der anschließenden Prozessprüfung auf Server und Arbeitsplatz waren JTL-Worker bzw. JTL-SharpWawi aktiv, jedoch keine eigenständigen Packtisch+- oder WMS-Prozesse erkennbar. Ein Anwender berichtet für Wawi 1.11 mit seiner eigenen Versandlösung, dass Packtisch+ oder WMS dauerhaft laufen muss. Eine generelle Änderung in Wawi 2.x ist damit nicht nachgewiesen. Welche Komponente den Import ausführt und ob die Wawi geöffnet bleiben muss, ist noch zu testen. Für jede Installation den automatischen Rückimport vor Produktivfreigabe prüfen; gegebenenfalls Packtisch+ oder WMS mit eingerichtetem Versanddatenaustausch betreiben.
+
 ## Einstieg
 
 1. [CSV-Installations- und Migrationsanleitung](docs/CSV-Setup.md) lesen.
